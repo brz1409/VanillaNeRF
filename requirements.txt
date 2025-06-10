@@ -3,5 +3,3 @@ numpy
 imageio
 imageio-ffmpeg
 tqdm
-# Optional: required to convert Metashape exports
-# nerfstudio

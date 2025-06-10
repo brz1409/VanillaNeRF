@@ -15,12 +15,10 @@ pip install -r requirements.txt
 ```
 
 The code only depends on PyTorch and a few utility libraries.  GPU support is recommended but not required.
-If you plan to process `cameras.xml` files from Metashape you will also need
-[`nerfstudio`](https://github.com/nerfstudio-project/nerfstudio):
-
-```bash
-pip install nerfstudio
-```
+If you plan to process `cameras.xml` files from Metashape no extra software is
+needed. This repository includes a minimal converter inspired by
+[`nerfstudio`](https://github.com/nerfstudio-project/nerfstudio) that will
+generate the required `transforms.json` automatically.
 
 ## Dataset format
 
@@ -40,19 +38,11 @@ If you already have a dataset in this format simply pass its directory to the tr
 
 ### Using `cameras.xml` from Agisoft Metashape
 
-Datasets produced by Agisoft Metashape can be converted to the same layout using the
-[nerfstudio](https://github.com/nerfstudio-project/nerfstudio) tools. After
-installing the package (`pip install nerfstudio`) run:
-
-```bash
-ns-process-data metashape --data <image_dir> --xml <path/to/cameras.xml> \
-    --output-dir <dataset_dir>
-```
-
-The command copies the images and generates a `transforms.json` file in
-`<dataset_dir>`. Our loader (`load_metashape_data`) will automatically call this
-tool if `transforms.json` is missing when you point `train.py` at the resulting
-directory.
+Place your Metashape export (`cameras.xml` and the image files) in a directory
+of your choice. When `train.py` is pointed at this directory it will run a small
+converter that reads the XML file and writes a compatible `transforms.json`. No
+external dependencies are necessary. Subsequent runs will reuse the generated
+JSON file.
 
 ## Running a training session
 

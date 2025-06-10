@@ -2,7 +2,9 @@
 
 import json
 import os
-from typing import Tuple
+import xml.etree.ElementTree as ET
+from pathlib import Path
+from typing import Dict, Tuple
 
 import imageio
 import numpy as np
@@ -80,13 +82,149 @@ class SimpleDataset(Dataset):
         return self.images[idx], self.poses[idx]
 
 
-def load_metashape_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    """Load a dataset exported from Agisoft Metashape using ``ns-process-data``.
+def _find_param(calib_xml: ET.Element, name: str) -> float:
+    """Utility to read calibration parameters from XML."""
 
-    If ``transforms.json`` is missing, this function will automatically invoke
-    the `ns-process-data metashape` command from `nerfstudio` to convert the
-    ``cameras.xml`` file into the standard NeRF format. The resulting
-    ``transforms.json`` is then parsed the same way as Blender datasets.
+    elem = calib_xml.find(name)
+    return float(elem.text) if elem is not None else 0.0
+
+
+def _convert_metashape(xml_file: Path, out_file: Path, image_map: Dict[str, Path]) -> None:
+    """Convert ``cameras.xml`` from Metashape to ``transforms.json``.
+
+    This is a lightweight re-implementation of the conversion used by
+    ``nerfstudio`` so that the ``nerfstudio`` package is not required.
+    Only basic perspective/fisheye/equirectangular cameras are supported.
+    """
+
+    tree = ET.parse(xml_file)
+    root = tree.getroot()
+    chunk = root[0]
+
+    sensors = chunk.find("sensors")
+    if sensors is None:
+        raise ValueError("No sensors found in cameras.xml")
+
+    calibrated = [s for s in sensors.iter("sensor") if s.get("type") == "spherical" or s.find("calibration")]
+    if not calibrated:
+        raise ValueError("No calibrated sensors in cameras.xml")
+
+    sensor_type = [s.get("type") for s in calibrated]
+    if sensor_type.count(sensor_type[0]) != len(sensor_type):
+        raise ValueError("Mixed sensor types are not supported")
+
+    if sensor_type[0] == "frame":
+        cam_model = "OPENCV"
+    elif sensor_type[0] == "fisheye":
+        cam_model = "OPENCV_FISHEYE"
+    elif sensor_type[0] == "spherical":
+        cam_model = "EQUIRECTANGULAR"
+    else:
+        raise ValueError(f"Unsupported sensor type {sensor_type[0]}")
+
+    sensor_dict = {}
+    for sensor in calibrated:
+        s = {}
+        res = sensor.find("resolution")
+        if res is None:
+            raise ValueError("Resolution missing in cameras.xml")
+        s["w"] = int(res.get("width"))
+        s["h"] = int(res.get("height"))
+
+        calib = sensor.find("calibration")
+        if calib is None:
+            # Spherical cameras have no intrinsics
+            s["fl_x"] = s["w"] / 2.0
+            s["fl_y"] = s["h"]
+            s["cx"] = s["w"] / 2.0
+            s["cy"] = s["h"] / 2.0
+        else:
+            f = calib.find("f")
+            if f is None:
+                raise ValueError("Focal length not found in calibration")
+            s["fl_x"] = s["fl_y"] = float(f.text)
+            s["cx"] = _find_param(calib, "cx") + s["w"] / 2.0
+            s["cy"] = _find_param(calib, "cy") + s["h"] / 2.0
+        sensor_dict[sensor.get("id")] = s
+
+    component_dict = {}
+    components = chunk.find("components")
+    if components is not None:
+        for comp in components.iter("component"):
+            t_elem = comp.find("transform")
+            if t_elem is None:
+                continue
+            rot = t_elem.find("rotation")
+            if rot is None or rot.text is None:
+                R = np.eye(3)
+            else:
+                R = np.array([float(x) for x in rot.text.split()]).reshape(3, 3)
+            trans = t_elem.find("translation")
+            if trans is None or trans.text is None:
+                T = np.zeros(3)
+            else:
+                T = np.array([float(x) for x in trans.text.split()])
+            scale = t_elem.find("scale")
+            s = 1.0 if scale is None or scale.text is None else float(scale.text)
+            m = np.eye(4)
+            m[:3, :3] = R
+            m[:3, 3] = T / s
+            component_dict[comp.get("id")] = m
+
+    frames = []
+    cameras = chunk.find("cameras")
+    if cameras is None:
+        raise ValueError("No cameras section in cameras.xml")
+
+    for cam in cameras.iter("camera"):
+        frame = {}
+        label = cam.get("label")
+        if label not in image_map:
+            label = label.split(".")[0]
+            if label not in image_map:
+                # skip images not present
+                continue
+        frame["file_path"] = image_map[label].name
+
+        sensor_id = cam.get("sensor_id")
+        if sensor_id not in sensor_dict:
+            continue
+        frame.update(sensor_dict[sensor_id])
+
+        t_elem = cam.find("transform")
+        if t_elem is None or t_elem.text is None:
+            continue
+        mat = np.array([float(x) for x in t_elem.text.split()]).reshape(4, 4)
+
+        comp_id = cam.get("component_id")
+        if comp_id in component_dict:
+            mat = component_dict[comp_id] @ mat
+
+        mat = mat[[2, 0, 1, 3], :]
+        mat[:, 1:3] *= -1
+        frame["transform_matrix"] = mat.tolist()
+        frames.append(frame)
+
+    applied = np.eye(4)[:3, :]
+    applied = applied[[2, 0, 1], :]
+
+    data = {
+        "camera_model": cam_model,
+        "frames": frames,
+        "applied_transform": applied.tolist(),
+    }
+
+    with open(out_file, "w", encoding="utf-8") as f:
+        json.dump(data, f, indent=4)
+
+
+def load_metashape_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load a dataset exported from Agisoft Metashape.
+
+    If ``transforms.json`` is missing this function converts the ``cameras.xml``
+    file found in ``basedir`` into that format using an embedded converter
+    adapted from the `nerfstudio` project. The JSON file is then loaded in the
+    same way as Blender datasets.
 
     Parameters
     ----------
@@ -103,29 +241,19 @@ def load_metashape_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarra
 
     json_path = os.path.join(basedir, "transforms.json")
     if not os.path.exists(json_path):
-        xml_path = os.path.join(basedir, "cameras.xml")
-        if not os.path.exists(xml_path):
+        xml_path = Path(basedir) / "cameras.xml"
+        if not xml_path.exists():
             raise FileNotFoundError(
                 "Dataset directory must contain either transforms.json or cameras.xml"
             )
 
-        # Call nerfstudio's conversion pipeline. This requires the
-        # ``nerfstudio`` package to be installed so that the ``ns-process-data``
-        # CLI is available. The command generates ``transforms.json`` in the
-        # same directory.
-        import subprocess
+        images = {
+            os.path.splitext(f)[0]: Path(basedir) / f
+            for f in os.listdir(basedir)
+            if f.lower().endswith((".png", ".jpg", ".jpeg"))
+        }
 
-        cmd = [
-            "ns-process-data",
-            "metashape",
-            "--data",
-            basedir,
-            "--xml",
-            xml_path,
-            "--output-dir",
-            basedir,
-        ]
-        subprocess.run(cmd, check=True)
+        _convert_metashape(xml_path, Path(json_path), images)
 
     # With the JSON file present we can rely on the regular loader
     return load_blender_data(basedir)
