@@ -1,31 +1,89 @@
 # Vanilla NeRF
 
-This repository contains a minimal implementation of a Vanilla NeRF model in PyTorch. The goal is to provide an accessible starting point for experimenting with neural radiance fields and view synthesis.
+This repository implements a compact version of **Neural Radiance Fields** (NeRF) in PyTorch.  It is intended as an educational resource that exposes all moving parts of a basic NeRF setup with clear code and extensive comments.
 
-## Features
-- Positional encoding for input coordinates and view directions
-- Fully connected MLP architecture for predicting color and density
-- Volume rendering to synthesize images
-- Training script with PSNR evaluation
+The project covers the full pipeline from loading a small Blender-style dataset to training a network that synthesises new views of the scene.
 
-## Requirements
-Install dependencies with:
+## Installation
+
+Create a virtual environment (optional) and install the Python dependencies:
+
 ```bash
+python -m venv venv
+source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Dataset
-The training script assumes a Blender-style dataset containing images and a
-``transforms_train.json`` file with camera poses. The helper function
-``load_blender_data`` parses this format and returns images, poses and camera
-intrinsics.
+The code only depends on PyTorch and a few utility libraries.  GPU support is recommended but not required.
 
-## Usage
-Training can be started with:
-```bash
-python train.py --data_dir /path/to/dataset
+## Dataset format
+
+`train.py` expects a dataset exported from Blender or a similar tool.  The directory should contain image files and a `transforms_train.json` file describing the camera parameters.  A minimal layout looks like this:
+
+```text
+my_scene/
+├─ transforms_train.json
+├─ 000.png
+├─ 001.png
+└─ ...
 ```
-Rendered images and checkpoints will be saved to the `outputs` folder.
 
-## Reference
+The JSON file follows the structure used in the original NeRF paper.  Each entry lists the path to an image (relative to the dataset directory) and the `4×4` camera-to-world transformation matrix.  `data/dataset.py` contains the `load_blender_data` function that parses this format and returns NumPy arrays of images and poses plus the image resolution and focal length.
+
+If you already have a dataset in this format simply pass its directory to the training script.
+
+## Running a training session
+
+The following command trains the model on a dataset located in `./my_scene` and stores checkpoints in `./outputs`:
+
+```bash
+python train.py --data_dir ./my_scene --out_dir ./outputs \
+    --num_epochs 2 --batch_size 2
+```
+
+Important options include:
+
+- `--num_epochs` – number of passes over the training set.
+- `--batch_size` – how many images to load per iteration.
+- `--lr` – learning rate for the Adam optimiser.
+- `--near` / `--far` – near and far bounds for ray sampling.
+- `--num_samples` – number of points sampled along each ray.
+
+During training the script prints the MSE loss for each batch.  After every epoch a checkpoint named `model_0000.pt`, `model_0001.pt`, ... is written to the output directory.
+
+## Inspecting results
+
+A saved checkpoint contains the weights of the `NeRF` network.  You can load it in Python and render novel views of the scene using the functions in `nerf/render.py`.  A minimal example is shown below:
+
+```python
+import torch
+from nerf.model import NeRF, PositionalEncoding
+from nerf.render import render_rays
+
+model = NeRF()
+model.load_state_dict(torch.load('outputs/model_0001.pt'))
+model.eval()
+
+# generate some rays (origins `rays_o` and directions `rays_d`)
+# then call render_rays to obtain RGB values
+colour_depth_acc = render_rays(
+    lambda pts, dirs: model(PositionalEncoding(10)(pts), PositionalEncoding(4)(dirs)),
+    rays_o, rays_d, near=2.0, far=6.0, num_samples=64,
+)
+```
+
+The dataset loader and training script are intentionally simple, so you can easily modify them for your own experiments.
+
+## Repository structure
+
+- `data/` – dataset utilities including `load_blender_data` and `SimpleDataset`.
+- `nerf/` – implementation of the `NeRF` model and the volumetric rendering code.
+- `train.py` – command-line interface for training the network on a Blender dataset.
+
+## Further reading
+
+To dive deeper into Neural Radiance Fields consult the original publication:
+
 - [NeRF: Representing Scenes as Neural Radiance Fields for View Synthesis](https://arxiv.org/abs/2003.08934)
+
+This repository is deliberately minimal, providing a concise starting point for custom research or teaching purposes.
