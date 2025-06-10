@@ -6,7 +6,12 @@ from tqdm import tqdm
 
 from nerf.model import NeRF, PositionalEncoding
 from nerf.render import render_rays
-from data.dataset import SimpleDataset, load_blender_data, load_metashape_data
+from data.dataset import (
+    SimpleDataset,
+    load_blender_data,
+    load_metashape_data,
+    load_llff_data,
+)
 
 
 def create_network() -> NeRF:
@@ -30,11 +35,13 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load dataset from disk. If a transforms.json file is present we use the
-    # regular Blender-style loader. Otherwise we fall back to Metashape support
-    # which will invoke ``ns-process-data`` if necessary.
-    if os.path.exists(os.path.join(args.data_dir, "transforms.json")) or \
-       os.path.exists(os.path.join(args.data_dir, "transforms_train.json")):
+    # Load dataset from disk. ``poses_bounds.npy`` indicates an LLFF-style
+    # dataset. Otherwise we try Blender-style JSON files and finally fall back
+    # to Metashape support which will invoke ``ns-process-data`` if necessary.
+    if os.path.exists(os.path.join(args.data_dir, "poses_bounds.npy")):
+        images, poses, hwf = load_llff_data(args.data_dir)
+    elif os.path.exists(os.path.join(args.data_dir, "transforms.json")) or \
+         os.path.exists(os.path.join(args.data_dir, "transforms_train.json")):
         images, poses, hwf = load_blender_data(args.data_dir)
     else:
         images, poses, hwf = load_metashape_data(args.data_dir)

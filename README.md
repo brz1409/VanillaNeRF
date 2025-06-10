@@ -22,7 +22,7 @@ generate the required `transforms.json` automatically.
 
 ## Dataset format
 
-`train.py` expects a dataset exported from Blender or a similar tool.  The directory should contain image files and a `transforms_train.json` file describing the camera parameters.  A minimal layout looks like this:
+`train.py` expects a dataset exported from Blender or a similar tool.  The directory should contain image files and a `transforms_train.json` file describing the camera parameters.  Alternatively you can use an LLFF dataset containing a `poses_bounds.npy` file.  A minimal Blender-style layout looks like this:
 
 ```text
 my_scene/
@@ -35,6 +35,10 @@ my_scene/
 The JSON file follows the structure used in the original NeRF paper.  Each entry lists the path to an image (relative to the dataset directory) and the `4×4` camera-to-world transformation matrix.  `data/dataset.py` contains the `load_blender_data` function that parses this format and returns NumPy arrays of images and poses plus the image resolution and focal length.
 
 If you already have a dataset in this format simply pass its directory to the training script.
+
+LLFF datasets are also supported. In this case the directory must contain an
+`images` folder (optionally downsampled versions like `images_4`) and a
+`poses_bounds.npy` file. Masks are ignored.
 
 ### Using `cameras.xml` from Agisoft Metashape
 
@@ -88,7 +92,8 @@ The dataset loader and training script are intentionally simple, so you can easi
 
 ## Repository structure
 
-- `data/` – dataset utilities including `load_blender_data`, `load_metashape_data` and `SimpleDataset`.
+- `data/` – dataset utilities including `load_blender_data`, `load_metashape_data`,
+  `load_llff_data` and `SimpleDataset`.
 - `nerf/` – implementation of the `NeRF` model and the volumetric rendering code.
 - `train.py` – command-line interface for training the network on a Blender dataset.
 

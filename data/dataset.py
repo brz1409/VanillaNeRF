@@ -257,3 +257,50 @@ def load_metashape_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarra
 
     # With the JSON file present we can rely on the regular loader
     return load_blender_data(basedir)
+
+def load_llff_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load images and poses from an LLFF dataset using ``poses_bounds.npy``.
+
+    Parameters
+    ----------
+    basedir : str
+        Directory containing ``poses_bounds.npy`` and an ``images`` folder.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray, np.ndarray]
+        ``images``: array of shape ``(N, H, W, 3)`` with uint8 values.
+        ``poses``: array of shape ``(N, 4, 4)`` containing camera extrinsics.
+        ``(H, W, focal)``: height, width and focal length of the images.
+    """
+    poses_bounds = np.load(os.path.join(basedir, "poses_bounds.npy"))
+    poses = poses_bounds[:, :-2].reshape([-1, 3, 5])
+
+    img_dir = None
+    for d in ["images_4", "images"]:
+        cand = os.path.join(basedir, d)
+        if os.path.isdir(cand):
+            img_dir = cand
+            break
+    if img_dir is None:
+        raise FileNotFoundError("LLFF dataset is missing an images directory")
+
+    img_files = [f for f in sorted(os.listdir(img_dir))
+                 if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+    if len(img_files) == 0:
+        raise FileNotFoundError("No images found in LLFF dataset")
+
+    images = [imageio.v2.imread(os.path.join(img_dir, f)) for f in img_files]
+    images = np.stack(images, axis=0)
+    h, w = images[0].shape[:2]
+
+    poses[:, :2, 4] = np.array([h, w])[:, None]
+    poses = np.concatenate([poses[:, 1:2], -poses[:, 0:1], poses[:, 2:]], axis=1)
+    poses = poses.astype(np.float32)
+
+    hwf = poses[0, :, 4]
+    poses = poses[:, :, :4]
+    bottom = np.tile(np.array([0, 0, 0, 1], dtype=np.float32), (poses.shape[0], 1)).reshape(poses.shape[0], 1, 4)
+    poses = np.concatenate([poses, bottom], axis=1)
+
+    return images, poses, (int(hwf[0]), int(hwf[1]), float(hwf[2]))
