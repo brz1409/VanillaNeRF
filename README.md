@@ -15,7 +15,10 @@ pip install -r requirements.txt
 ```
 
 ## Dataset
-The code expects a dataset of images, camera intrinsics and poses similar to the [LLFF](https://github.com/Fyusion/LLFF) or Blender synthetic datasets. Update paths in `train.py` accordingly.
+The training script assumes a Blender-style dataset containing images and a
+``transforms_train.json`` file with camera poses. The helper function
+``load_blender_data`` parses this format and returns images, poses and camera
+intrinsics.
 
 ## Usage
 Training can be started with:
