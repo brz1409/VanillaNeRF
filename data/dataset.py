@@ -1,4 +1,4 @@
-"""Dataset utilities for loading Blender-style scenes used in NeRF experiments."""
+"""Dataset utilities for loading datasets in Blender and Metashape formats."""
 
 import json
 import os
@@ -78,3 +78,54 @@ class SimpleDataset(Dataset):
     def __getitem__(self, idx):
         # Return image tensor and corresponding camera pose
         return self.images[idx], self.poses[idx]
+
+
+def load_metashape_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load a dataset exported from Agisoft Metashape using ``ns-process-data``.
+
+    If ``transforms.json`` is missing, this function will automatically invoke
+    the `ns-process-data metashape` command from `nerfstudio` to convert the
+    ``cameras.xml`` file into the standard NeRF format. The resulting
+    ``transforms.json`` is then parsed the same way as Blender datasets.
+
+    Parameters
+    ----------
+    basedir : str
+        Directory containing the images and ``cameras.xml`` file.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray, np.ndarray]
+        ``images``: array of shape ``(N, H, W, 3)`` with uint8 values.
+        ``poses``: array of shape ``(N, 4, 4)`` containing camera extrinsics.
+        ``(H, W, focal)``: height, width and focal length of the images.
+    """
+
+    json_path = os.path.join(basedir, "transforms.json")
+    if not os.path.exists(json_path):
+        xml_path = os.path.join(basedir, "cameras.xml")
+        if not os.path.exists(xml_path):
+            raise FileNotFoundError(
+                "Dataset directory must contain either transforms.json or cameras.xml"
+            )
+
+        # Call nerfstudio's conversion pipeline. This requires the
+        # ``nerfstudio`` package to be installed so that the ``ns-process-data``
+        # CLI is available. The command generates ``transforms.json`` in the
+        # same directory.
+        import subprocess
+
+        cmd = [
+            "ns-process-data",
+            "metashape",
+            "--data",
+            basedir,
+            "--xml",
+            xml_path,
+            "--output-dir",
+            basedir,
+        ]
+        subprocess.run(cmd, check=True)
+
+    # With the JSON file present we can rely on the regular loader
+    return load_blender_data(basedir)

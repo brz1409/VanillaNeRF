@@ -15,6 +15,12 @@ pip install -r requirements.txt
 ```
 
 The code only depends on PyTorch and a few utility libraries.  GPU support is recommended but not required.
+If you plan to process `cameras.xml` files from Metashape you will also need
+[`nerfstudio`](https://github.com/nerfstudio-project/nerfstudio):
+
+```bash
+pip install nerfstudio
+```
 
 ## Dataset format
 
@@ -31,6 +37,22 @@ my_scene/
 The JSON file follows the structure used in the original NeRF paper.  Each entry lists the path to an image (relative to the dataset directory) and the `4×4` camera-to-world transformation matrix.  `data/dataset.py` contains the `load_blender_data` function that parses this format and returns NumPy arrays of images and poses plus the image resolution and focal length.
 
 If you already have a dataset in this format simply pass its directory to the training script.
+
+### Using `cameras.xml` from Agisoft Metashape
+
+Datasets produced by Agisoft Metashape can be converted to the same layout using the
+[nerfstudio](https://github.com/nerfstudio-project/nerfstudio) tools. After
+installing the package (`pip install nerfstudio`) run:
+
+```bash
+ns-process-data metashape --data <image_dir> --xml <path/to/cameras.xml> \
+    --output-dir <dataset_dir>
+```
+
+The command copies the images and generates a `transforms.json` file in
+`<dataset_dir>`. Our loader (`load_metashape_data`) will automatically call this
+tool if `transforms.json` is missing when you point `train.py` at the resulting
+directory.
 
 ## Running a training session
 
@@ -76,7 +98,7 @@ The dataset loader and training script are intentionally simple, so you can easi
 
 ## Repository structure
 
-- `data/` – dataset utilities including `load_blender_data` and `SimpleDataset`.
+- `data/` – dataset utilities including `load_blender_data`, `load_metashape_data` and `SimpleDataset`.
 - `nerf/` – implementation of the `NeRF` model and the volumetric rendering code.
 - `train.py` – command-line interface for training the network on a Blender dataset.
 
