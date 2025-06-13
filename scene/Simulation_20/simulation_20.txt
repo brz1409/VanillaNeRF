@@ -1,0 +1,12 @@
+Directory structure:
+
+|---this_file.txt
+|---images
+|   |---<image_0>
+|   |---<image_1>
+|   |---...
+|---sparse
+	|---0
+		|---cameras.bin
+		|---images.bin
+		|---points3D.bin

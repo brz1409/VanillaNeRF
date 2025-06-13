@@ -63,7 +63,7 @@ def load_llff_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int
 
     hwf = poses_arr[0, :, 4].astype(np.float32)
     poses = poses_arr[..., :4].astype(np.float32)
-    poses = np.stack([poses[:, 1], -poses[:, 0], poses[:, 2], poses[:, 3]], 1)
+    poses = np.stack([poses[:, :, 1], -poses[:, :, 0], poses[:, :, 2], poses[:, :, 3]], axis=-1)
 
     img_dir = os.path.join(basedir, "images")
     if not os.path.exists(img_dir):
