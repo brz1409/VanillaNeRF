@@ -9,6 +9,7 @@ from typing import Dict, Tuple
 import imageio
 import numpy as np
 import torch
+import torch.nn.functional as F
 from torch.utils.data import Dataset
 
 
@@ -257,6 +258,87 @@ def load_metashape_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarra
 
     # With the JSON file present we can rely on the regular loader
     return load_blender_data(basedir)
+
+def load_llff_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    """Load images and poses from an LLFF dataset using ``poses_bounds.npy``.
+
+    Parameters
+    ----------
+    basedir : str
+        Directory containing ``poses_bounds.npy`` and an ``images`` folder.
+
+    Returns
+    -------
+    Tuple[np.ndarray, np.ndarray, np.ndarray]
+        ``images``: array of shape ``(N, H, W, 3)`` with uint8 values.
+        ``poses``: array of shape ``(N, 4, 4)`` containing camera extrinsics.
+        ``(H, W, focal)``: height, width and focal length of the images.
+    """
+    poses_bounds = np.load(os.path.join(basedir, "poses_bounds.npy"))
+    poses = poses_bounds[:, :-2].reshape([-1, 3, 5])
+
+    img_dir = None
+    for d in ["images_4", "images"]:
+        cand = os.path.join(basedir, d)
+        if os.path.isdir(cand):
+            img_dir = cand
+            break
+    if img_dir is None:
+        raise FileNotFoundError("LLFF dataset is missing an images directory")
+
+    img_files = [f for f in sorted(os.listdir(img_dir))
+                 if f.lower().endswith((".png", ".jpg", ".jpeg"))]
+    if len(img_files) == 0:
+        raise FileNotFoundError("No images found in LLFF dataset")
+
+    images = [imageio.v2.imread(os.path.join(img_dir, f)) for f in img_files]
+    images = np.stack(images, axis=0)
+    h, w = images[0].shape[:2]
+
+    poses[:, :2, 4] = np.array([h, w])[:, None]
+    poses = np.concatenate([poses[:, 1:2], -poses[:, 0:1], poses[:, 2:]], axis=1)
+    poses = poses.astype(np.float32)
+
+    hwf = poses[0, :, 4]
+    poses = poses[:, :, :4]
+    bottom = np.tile(np.array([0, 0, 0, 1], dtype=np.float32), (poses.shape[0], 1)).reshape(poses.shape[0], 1, 4)
+    poses = np.concatenate([poses, bottom], axis=1)
+
+    return images, poses, (int(hwf[0]), int(hwf[1]), float(hwf[2]))
+
+
+def downsample_data(
+    images: np.ndarray, hwf: Tuple[int, int, float], factor: int
+) -> Tuple[np.ndarray, Tuple[int, int, float]]:
+    """Downsample images and adjust focal length by ``factor``.
+
+    Parameters
+    ----------
+    images : np.ndarray
+        Image array of shape ``(N, H, W, 3)``.
+    hwf : Tuple[int, int, float]
+        ``(H, W, focal)`` describing the original resolution.
+    factor : int
+        Desired downsampling factor. Values ``<=1`` return the input unchanged.
+
+    Returns
+    -------
+    Tuple[np.ndarray, Tuple[int, int, float]]
+        The downsampled images and updated ``(H, W, focal)`` tuple.
+    """
+
+    if factor <= 1:
+        return images, hwf
+
+    h, w, focal = hwf
+    new_h = max(1, int(h / factor))
+    new_w = max(1, int(w / factor))
+
+    tensor = torch.from_numpy(images).permute(0, 3, 1, 2).float()
+    tensor = F.interpolate(tensor, size=(new_h, new_w), mode="area")
+    images_ds = tensor.byte().permute(0, 2, 3, 1).numpy()
+
+    return images_ds, (new_h, new_w, focal / factor)
 
 def load_llff_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
     """Load images and poses from an LLFF dataset using ``poses_bounds.npy``.
