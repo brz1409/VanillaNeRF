@@ -1,0 +1,24 @@
+# Virtuelle Umgebungen
+venv/
+ENV/
+env/
+.venv/
+
+# Python-Cache-Dateien
+__pycache__/
+*.py[cod]
+*$py.class
+
+# Jupyter Notebook Checkpoints
+.ipynb_checkpoints
+
+# Logdateien
+*.log
+
+# Betriebssystem-Dateien
+.DS_Store
+Thumbs.db
+
+# Sonstiges
+*.swp
+*.bak
