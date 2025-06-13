@@ -1,4 +1,5 @@
 import argparse
+import json
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -6,7 +7,17 @@ from tqdm import tqdm
 
 from nerf.model import NeRF, PositionalEncoding
 from nerf.render import render_rays
-from data.dataset import SimpleDataset, load_blender_data, load_metashape_data
+from data.dataset import SimpleDataset, load_llff_data, downsample_data
+
+
+DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "configs", "default.json")
+
+
+def load_config(path: str) -> dict:
+    """Load configuration from JSON file."""
+
+    with open(path, "r", encoding="utf-8") as f:
+        return json.load(f)
 
 
 def create_network() -> NeRF:
@@ -30,14 +41,14 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # Load dataset from disk. If a transforms.json file is present we use the
-    # regular Blender-style loader. Otherwise we fall back to Metashape support
-    # which will invoke ``ns-process-data`` if necessary.
-    if os.path.exists(os.path.join(args.data_dir, "transforms.json")) or \
-       os.path.exists(os.path.join(args.data_dir, "transforms_train.json")):
-        images, poses, hwf = load_blender_data(args.data_dir)
-    else:
-        images, poses, hwf = load_metashape_data(args.data_dir)
+    # LLFF datasets store poses in ``poses_bounds.npy``
+    images, poses, hwf, near, far = load_llff_data(args.data_dir)
+    if args.near is None:
+        args.near = near
+    if args.far is None:
+        args.far = far
+
+    images, hwf = downsample_data(images, hwf, args.downsample)
     dataset = SimpleDataset(images, poses, hwf)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
@@ -89,13 +100,26 @@ def train(args):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--data_dir', required=True, help='Path to dataset')
-    parser.add_argument('--out_dir', default='outputs', help='Directory to save results')
-    parser.add_argument('--batch_size', type=int, default=1)
-    parser.add_argument('--lr', type=float, default=5e-4)
-    parser.add_argument('--num_epochs', type=int, default=1)
-    parser.add_argument('--near', type=float, default=2.0)
-    parser.add_argument('--far', type=float, default=6.0)
-    parser.add_argument('--num_samples', type=int, default=64)
+    parser.add_argument("--config", help="Path to a JSON config file")
+    parser.add_argument("--data_dir", required=True, help="Path to dataset")
+    parser.add_argument("--out_dir", default="outputs", help="Directory to save results")
+    parser.add_argument("--batch_size", type=int, default=None)
+    parser.add_argument("--lr", type=float, default=None)
+    parser.add_argument("--num_epochs", type=int, default=None)
+    parser.add_argument("--near", type=float, default=None)
+    parser.add_argument("--far", type=float, default=None)
+    parser.add_argument("--num_samples", type=int, default=None)
+    parser.add_argument("--downsample", type=int, default=None,
+                        help="Downsample factor for input images")
+
     args = parser.parse_args()
+
+    # Load configuration defaults and merge with CLI arguments
+    config = load_config(DEFAULT_CONFIG)
+    if args.config:
+        config.update(load_config(args.config))
+    for key, val in config.items():
+        if getattr(args, key) is None:
+            setattr(args, key, val)
+
     train(args)

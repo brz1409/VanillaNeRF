@@ -2,7 +2,7 @@
 
 This repository implements a compact version of **Neural Radiance Fields** (NeRF) in PyTorch.  It is intended as an educational resource that exposes all moving parts of a basic NeRF setup with clear code and extensive comments.
 
-The project covers the full pipeline from loading a small Blender-style dataset to training a network that synthesises new views of the scene.
+The project covers the full pipeline from loading an LLFF dataset with `poses_bounds.npy` to training a network that synthesises new views of the scene.
 
 ## Installation
 
@@ -15,43 +15,47 @@ pip install -r requirements.txt
 ```
 
 The code only depends on PyTorch and a few utility libraries.  GPU support is recommended but not required.
-If you plan to process `cameras.xml` files from Metashape no extra software is
-needed. This repository includes a minimal converter inspired by
-[`nerfstudio`](https://github.com/nerfstudio-project/nerfstudio) that will
-generate the required `transforms.json` automatically.
 
 ## Dataset format
 
-`train.py` expects a dataset exported from Blender or a similar tool.  The directory should contain image files and a `transforms_train.json` file describing the camera parameters.  A minimal layout looks like this:
+`train.py` expects a directory containing an `images` folder and a
+`poses_bounds.npy` file in the style of the LLFF datasets. Masks are ignored.
+If you have multiple downsampled image folders (`images_4`, `images_8`, ...)
+the loader picks the first one that exists.
 
-```text
-my_scene/
-├─ transforms_train.json
-├─ 000.png
-├─ 001.png
-└─ ...
+To train on a dataset simply point the script to the directory:
+
+```bash
+python train.py --data_dir ./my_scene
 ```
 
-The JSON file follows the structure used in the original NeRF paper.  Each entry lists the path to an image (relative to the dataset directory) and the `4×4` camera-to-world transformation matrix.  `data/dataset.py` contains the `load_blender_data` function that parses this format and returns NumPy arrays of images and poses plus the image resolution and focal length.
-
-If you already have a dataset in this format simply pass its directory to the training script.
-
-### Using `cameras.xml` from Agisoft Metashape
-
-Place your Metashape export (`cameras.xml` and the image files) in a directory
-of your choice. When `train.py` is pointed at this directory it will run a small
-converter that reads the XML file and writes a compatible `transforms.json`. No
-external dependencies are necessary. Subsequent runs will reuse the generated
-JSON file.
+The near and far bounds used for ray sampling are automatically extracted from
+`poses_bounds.npy`. You can override them on the command line if needed.
 
 ## Running a training session
 
-The following command trains the model on a dataset located in `./my_scene` and stores checkpoints in `./outputs`:
+The simplest way to train is to rely on the default settings from
+`configs/default.json`. You can override any parameter on the command line.
+The following command trains the model on a dataset located in `./my_scene`
+and stores checkpoints in `./outputs`:
 
 ```bash
 python train.py --data_dir ./my_scene --out_dir ./outputs \
     --num_epochs 2 --batch_size 2
 ```
+
+If you maintain your own configuration file pass it via `--config`:
+
+```bash
+python train.py --config my_config.json --data_dir ./my_scene
+```
+
+Large images can be downsampled on the fly using `--downsample`. For example
+`--downsample 4` loads the images at quarter resolution which can speed up
+experimentation.
+
+The near and far bounds are read from `poses_bounds.npy` but can be overridden on
+the command line or in a custom config file.
 
 Important options include:
 
@@ -80,7 +84,7 @@ model.eval()
 # then call render_rays to obtain RGB values
 colour_depth_acc = render_rays(
     lambda pts, dirs: model(PositionalEncoding(10)(pts), PositionalEncoding(4)(dirs)),
-    rays_o, rays_d, near=2.0, far=6.0, num_samples=64,
+    rays_o, rays_d, near=dataset_near, far=dataset_far, num_samples=64,
 )
 ```
 
@@ -88,9 +92,9 @@ The dataset loader and training script are intentionally simple, so you can easi
 
 ## Repository structure
 
-- `data/` – dataset utilities including `load_blender_data`, `load_metashape_data` and `SimpleDataset`.
+- `data/` – dataset utilities including `load_llff_data`, `downsample_data` and `SimpleDataset`.
 - `nerf/` – implementation of the `NeRF` model and the volumetric rendering code.
-- `train.py` – command-line interface for training the network on a Blender dataset.
+- `train.py` – command-line interface for training the network on an LLFF dataset.
 
 ## Further reading
 
