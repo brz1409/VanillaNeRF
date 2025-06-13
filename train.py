@@ -64,9 +64,9 @@ def train(args):
         for imgs, poses in pbar:
             imgs = imgs.to(device)
 
-            # The Blender dataset stores camera directions in the rotation
-            # matrix columns. Here we extract ray origins and directions for
-            # all pixels in the batch.
+            # Camera poses follow the LLFF convention where the third column of
+            # the extrinsic matrix represents the viewing direction. Here we
+            # extract ray origins and directions for all pixels in the batch.
             rays_o = poses[:, :3, 3]
             rays_d = poses[:, :3, 2]
             rays_o = rays_o.reshape(-1, 3)
