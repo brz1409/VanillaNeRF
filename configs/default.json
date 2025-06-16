@@ -3,6 +3,6 @@
   "lr": 0.0005,
   "num_epochs": 2000,
   "num_samples": 64,
-  "i_print": 100,
+  "batch_size": 128,
   "i_img": 500
 }

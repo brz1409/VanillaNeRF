@@ -21,7 +21,7 @@ class PositionalEncoding(nn.Module):
         self.num_freqs = num_freqs
         self.include_input = include_input
         # Frequencies grow exponentially as 2^k
-        self.freq_bands = 2.0 ** torch.arange(num_freqs)
+        self.register_buffer("freq_bands", 2.0 ** torch.arange(num_freqs))
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Encode ``x`` with sine and cosine functions."""

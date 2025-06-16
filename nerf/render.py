@@ -61,7 +61,9 @@ def render_rays(
 
     rgb = torch.sigmoid(raw[..., :3])
     sigma = F.relu(raw[..., 3])
-    alpha = 1.0 - torch.exp(-sigma)
+    delta = z_vals[..., 1:] - z_vals[..., :-1]
+    delta = torch.cat([delta, 1e10 * torch.ones_like(delta[..., :1])], -1)
+    alpha = 1.0 - torch.exp(-sigma * delta)
 
     # Accumulate colors along each ray using alpha compositing
     weights = alpha * torch.cumprod(

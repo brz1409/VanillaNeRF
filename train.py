@@ -63,11 +63,7 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    # LLFF datasets store poses in ``poses_bounds.npy``
-    images, poses, hwf, near, far = load_llff_data(args.data_dir)
-
-    H, W, focal = hwf
-    H, W = int(H), int(W)
+    images, poses, hwf, near, far = load_llff_data(args.data_dir, ...)
 
     if args.near is None:
         args.near = near
@@ -75,6 +71,8 @@ def train(args):
         args.far = far
 
     images, hwf = downsample_data(images, hwf, args.downsample)
+    H, W, focal = [int(hw) for hw in hwf]
+
     dataset = SimpleDataset(images, poses, hwf)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
@@ -94,7 +92,8 @@ def train(args):
             img = imgs[i]
             pose = poses[i]
 
-            rays_o, rays_d, target = sample_random_rays(img, pose, H, W, focal, N_rand=1024)
+            N_rand = args.batch_size  # kommt aus deiner Config oder CLI
+            rays_o, rays_d, target = sample_random_rays(img, pose, H, W, focal, N_rand=N_rand)
             rays_o = rays_o.to(device)
             rays_d = rays_d.to(device)
             target = target.to(device)
