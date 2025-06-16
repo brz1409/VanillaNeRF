@@ -3,8 +3,10 @@ import json
 import math
 import os
 import torch
+import imageio
 from torch.utils.data import DataLoader
 from torch.utils.tensorboard import SummaryWriter
+import datetime
 from tqdm import tqdm
 
 
@@ -65,6 +67,8 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    run_name = args.run_name
+
     if not os.path.isdir(args.data_dir):
         raise FileNotFoundError(f"Dataset directory '{args.data_dir}' not found")
 
@@ -91,9 +95,11 @@ def train(args):
         raise ValueError(f"eval_index {args.eval_index} is out of range")
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
-    writer = SummaryWriter(args.log_dir)
+    log_dir = os.path.join(args.log_dir, run_name)
+    os.makedirs(log_dir, exist_ok=True)
+    writer = SummaryWriter(log_dir)
     print(
-        f"TensorBoard logs at {args.log_dir}. "
+        f"TensorBoard logs at {log_dir}. "
         f"Run `tensorboard --logdir {args.log_dir}` to view."
     )
     print(f"Rendering evaluation image from index {args.eval_index}")
@@ -105,7 +111,16 @@ def train(args):
     dir_enc.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
-    os.makedirs(args.out_dir, exist_ok=True)
+    out_dir = os.path.join(args.out_dir, run_name)
+    os.makedirs(out_dir, exist_ok=True)
+    with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(vars(args), f, indent=2)
+
+    def network(pts, dirs):
+        """Encode inputs and evaluate the NeRF model."""
+        enc_p = pos_enc(pts)
+        enc_d = dir_enc(dirs)
+        return model(enc_p, enc_d)
 
     epoch_bar = tqdm(range(args.num_epochs), desc="Training", unit="epoch")
     global_step = 0
@@ -127,12 +142,6 @@ def train(args):
             rays_d = rays_d.to(device)
             target = target.to(device)
 
-            def network(pts, dirs):
-                """Encode inputs and evaluate the NeRF model."""
-                enc_p = pos_enc(pts)
-                enc_d = dir_enc(dirs)
-                return model(enc_p, enc_d)
-
             outputs = render_rays(
                 network, rays_o, rays_d, args.near, args.far, args.num_samples
             )
@@ -151,37 +160,46 @@ def train(args):
             epoch_loss += loss.item()
             pbar.set_postfix({"loss": loss.item(), "psnr": psnr.item()})
 
-    with torch.no_grad():
-        pose = dataset.poses[args.eval_index].to(device)
-        rays_o_full, rays_d_full = get_rays(H, W, focal, pose)
-        rgb_depth = render_rays(
-            network,
-            rays_o_full.reshape(-1, 3),
-            rays_d_full.reshape(-1, 3),
-            args.near,
-            args.far,
-            args.num_samples,
-            rand=False,
-        )
-        img_pred = rgb_depth[:, :3].reshape(H, W, 3)
-        writer.add_image("train/render", img_pred.permute(2, 0, 1).cpu(), epoch)
+        with torch.no_grad():
+            pose = dataset.poses[args.eval_index].to(device)
+            rays_o_full, rays_d_full = get_rays(H, W, focal, pose)
+            rgb_depth = render_rays(
+                network,
+                rays_o_full.reshape(-1, 3),
+                rays_d_full.reshape(-1, 3),
+                args.near,
+                args.far,
+                args.num_samples,
+                rand=False,
+            )
+            img_pred = rgb_depth[:, :3].reshape(H, W, 3)
+            writer.add_image(
+                "train/render", img_pred.permute(2, 0, 1).cpu(), epoch
+            )
+            img_path = os.path.join(out_dir, f"render_{epoch:04d}.png")
+            imageio.imwrite(
+                img_path, (img_pred.cpu().numpy() * 255).astype("uint8")
+            )
+            print(f"Saved evaluation image to {img_path}")
 
-        target_img = dataset.images[args.eval_index].to(device)
-        mse_img = torch.mean((img_pred - target_img) ** 2)
-        psnr_eval = (-10.0 * torch.log10(mse_img))
-        writer.add_scalar("eval/psnr", psnr_eval.item(), epoch)
+            target_img = dataset.images[args.eval_index].to(device)
+            mse_img = torch.mean((img_pred - target_img) ** 2)
+            psnr_eval = (-10.0 * torch.log10(mse_img))
+            writer.add_scalar("eval/psnr", psnr_eval.item(), epoch)
 
-        avg_loss = epoch_loss / len(dataloader)
-        writer.add_scalar("epoch/loss", avg_loss, epoch)
-        writer.add_histogram("params/alpha", model.alpha_linear.weight, epoch)
+            avg_loss = epoch_loss / len(dataloader)
+            writer.add_scalar("epoch/loss", avg_loss, epoch)
+            writer.add_histogram(
+                "params/alpha", model.alpha_linear.weight, epoch
+            )
 
-        writer.flush()
+            writer.flush()
 
-        if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
-            ckpt_path = os.path.join(args.out_dir, f"model_{epoch:04d}.pt")
-            torch.save(model.state_dict(), ckpt_path)
-            print(f"Saved checkpoint to {ckpt_path}")
-        epoch_bar.set_postfix({"loss": avg_loss, "psnr": psnr_eval.item()})
+            if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
+                ckpt_path = os.path.join(out_dir, f"model_{epoch:04d}.pt")
+                torch.save(model.state_dict(), ckpt_path)
+                print(f"Saved checkpoint to {ckpt_path}")
+            epoch_bar.set_postfix({"loss": avg_loss, "psnr": psnr_eval.item()})
 
     writer.close()
 
@@ -221,5 +239,9 @@ if __name__ == '__main__':
     for key, val in config.items():
         if getattr(args, key) is None:
             setattr(args, key, val)
+
+    # Create a unique name for this run
+    timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    args.run_name = f"{os.path.basename(args.data_dir.rstrip(os.sep))}_{timestamp}"
 
     train(args)

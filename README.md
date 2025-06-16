@@ -71,6 +71,7 @@ Important options include:
 - `--num_rays` – how many rays to sample from each image.
 - `--save_every` – how often (in epochs) to write a checkpoint.
 - `--eval_index` – which training image to render for monitoring.
+- `--log_dir` – base directory for TensorBoard logs.
 
 During training the script prints the MSE loss for each batch.  Logs are also written for TensorBoard under `--log_dir` including PSNR and learning rate.  Start TensorBoard with:
 
@@ -79,11 +80,14 @@ tensorboard --logdir runs
 ```
 
 The dashboard shows the training loss, PSNR, learning rate curves and a rendered
-example image for each epoch. The image is rendered from the camera pose at
-`--eval_index` (0 by default), so you can choose which viewpoint to monitor.
+example image for each epoch. Each training run creates a new subdirectory in
+`--log_dir` and `--out_dir` named after the dataset and a timestamp. The image
+is rendered from the camera pose at `--eval_index` (0 by default) and saved as
+`render_0000.png`, `render_0001.png`, ... in the output directory so you can
+track progress frame by frame.
 TensorBoard prints a URL (typically `http://localhost:6006`). Open it in a browser to monitor progress.
 
-Checkpoints are saved every `--save_every` epochs as `model_0000.pt`, `model_0010.pt`, ... in the output directory.
+Checkpoints are saved every `--save_every` epochs as `model_0000.pt`, `model_0010.pt`, ... inside the run folder under `--out_dir`.
 
 ## Inspecting results
 
