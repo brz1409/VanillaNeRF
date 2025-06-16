@@ -138,6 +138,8 @@ def train(args):
             rays_o, rays_d, target = sample_random_rays(
                 img, pose, H, W, focal, N_rand=N_rand
             )
+            print(f"Sampled {N_rand} random rays for epoch {epoch + 1}, batch step {global_step}")
+
             rays_o = rays_o.to(device)
             rays_d = rays_d.to(device)
             target = target.to(device)
@@ -176,11 +178,12 @@ def train(args):
             writer.add_image(
                 "train/render", img_pred.permute(2, 0, 1).cpu(), epoch
             )
-            img_path = os.path.join(out_dir, f"render_{epoch:04d}.png")
-            imageio.imwrite(
-                img_path, (img_pred.cpu().numpy() * 255).astype("uint8")
-            )
-            print(f"Saved evaluation image to {img_path}")
+            if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
+                img_path = os.path.join(out_dir, f"render_{epoch:04d}.png")
+                imageio.imwrite(
+                    img_path, (img_pred.cpu().numpy() * 255).astype("uint8")
+                )
+                print(f"Saved evaluation image to {img_path}")
 
             target_img = dataset.images[args.eval_index].to(device)
             mse_img = torch.mean((img_pred - target_img) ** 2)
