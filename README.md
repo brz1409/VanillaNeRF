@@ -14,7 +14,11 @@ source venv/bin/activate
 pip install -r requirements.txt
 ```
 
-The code only depends on PyTorch and a few utility libraries.  GPU support is recommended but not required.
+The code only depends on PyTorch and a few utility libraries.  GPU support is recommended but not required. If TensorBoard fails to start with a `MessageToJson` error, upgrade `protobuf`:
+
+```bash
+pip install -U protobuf>=3.20
+```
 
 ## Dataset format
 
@@ -67,13 +71,13 @@ Important options include:
 - `--num_rays` – how many rays to sample from each image.
 - `--save_every` – how often (in epochs) to write a checkpoint.
 
-During training the script prints the MSE loss for each batch.  Logs are also written for TensorBoard under `--log_dir`.  Start TensorBoard with:
+During training the script prints the MSE loss for each batch.  Logs are also written for TensorBoard under `--log_dir` including PSNR and learning rate.  Start TensorBoard with:
 
 ```bash
 tensorboard --logdir runs
 ```
 
-The dashboard shows the training loss and a rendered example image for each epoch.
+The dashboard shows the training loss, PSNR, learning rate curves and a rendered example image for each epoch.
 TensorBoard prints a URL (typically `http://localhost:6006`). Open it in a browser to monitor progress.
 
 Checkpoints are saved every `--save_every` epochs as `model_0000.pt`, `model_0010.pt`, ... in the output directory.

@@ -1,5 +1,6 @@
 import argparse
 import json
+import math
 import os
 import torch
 from torch.utils.data import DataLoader
@@ -105,6 +106,7 @@ def train(args):
     global_step = 0
     for epoch in epoch_bar:
         pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}", leave=False)
+        epoch_loss = 0.0
         for imgs, poses in pbar:
             imgs = imgs.to(device)
 
@@ -131,14 +133,18 @@ def train(args):
             )
             pred_rgb = outputs[:, :3]
             loss = torch.mean((pred_rgb - target) ** 2)
+            psnr = -10.0 * torch.log10(loss)
             optimizer.zero_grad()
             loss.backward()
             optimizer.step()
 
             writer.add_scalar("train/loss", loss.item(), global_step)
+            writer.add_scalar("train/psnr", psnr.item(), global_step)
+            writer.add_scalar("train/lr", optimizer.param_groups[0]["lr"], global_step)
             global_step += 1
 
-            pbar.set_postfix({"loss": loss.item()})
+            epoch_loss += loss.item()
+            pbar.set_postfix({"loss": loss.item(), "psnr": psnr.item()})
 
     with torch.no_grad():
         pose = poses[0].to(device)
@@ -155,11 +161,17 @@ def train(args):
         img_pred = rgb_depth[:, :3].reshape(H, W, 3).cpu().permute(2, 0, 1)
         writer.add_image("train/render", img_pred, epoch)
 
+        avg_loss = epoch_loss / len(dataloader)
+        writer.add_scalar("epoch/loss", avg_loss, epoch)
+        writer.add_histogram("params/alpha", model.alpha_linear.weight, epoch)
+
+        writer.flush()
+
         if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
             ckpt_path = os.path.join(args.out_dir, f"model_{epoch:04d}.pt")
             torch.save(model.state_dict(), ckpt_path)
             print(f"Saved checkpoint to {ckpt_path}")
-        epoch_bar.set_postfix({"loss": loss.item()})
+        epoch_bar.set_postfix({"loss": avg_loss})
 
     writer.close()
 
