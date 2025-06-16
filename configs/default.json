@@ -1,7 +1,8 @@
 {
-  "batch_size": 1,
+  "batch_size": 256,
   "lr": 0.0005,
-  "num_epochs": 1,
+  "num_epochs": 2000,
   "num_samples": 64,
-  "downsample":4,
+  "i_print": 100,
+  "i_img": 500
 }

@@ -13,6 +13,28 @@ from data.dataset import SimpleDataset, load_llff_data, downsample_data
 DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "configs", "default.json")
 
 
+def get_rays(H, W, focal, c2w):
+    i, j = torch.meshgrid(
+        torch.arange(W, dtype=torch.float32),
+        torch.arange(H, dtype=torch.float32),
+        indexing="ij"
+    )
+    dirs = torch.stack([(i - W * 0.5) / focal, -(j - H * 0.5) / focal, -torch.ones_like(i)], -1)
+    rays_d = torch.sum(dirs[..., None, :] * c2w[:3, :3], -1)  # Weltkoordinaten
+    rays_o = c2w[:3, 3].expand(rays_d.shape)  # Ursprung überall gleich
+    return rays_o, rays_d
+
+def sample_random_rays(img, pose, H, W, focal, N_rand):
+    rays_o, rays_d = get_rays(H, W, focal, pose)
+    rays_o = rays_o.reshape(-1, 3)
+    rays_d = rays_d.reshape(-1, 3)
+    target_rgb = img.reshape(-1, 3)
+
+    indices = torch.randint(0, rays_o.shape[0], (N_rand,))
+    return rays_o[indices], rays_d[indices], target_rgb[indices]
+
+
+
 def load_config(path: str) -> dict:
     """Load configuration from JSON file."""
 
@@ -43,6 +65,10 @@ def train(args):
 
     # LLFF datasets store poses in ``poses_bounds.npy``
     images, poses, hwf, near, far = load_llff_data(args.data_dir)
+
+    H, W, focal = hwf
+    H, W = int(H), int(W)
+
     if args.near is None:
         args.near = near
     if args.far is None:
@@ -64,14 +90,14 @@ def train(args):
         for imgs, poses in pbar:
             imgs = imgs.to(device)
 
-            # Camera poses follow the LLFF convention where the third column of
-            # the extrinsic matrix represents the viewing direction. Here we
-            # extract ray origins and directions for all pixels in the batch.
-            rays_o = poses[:, :3, 3]
-            rays_d = poses[:, :3, 2]
-            rays_o = rays_o.reshape(-1, 3)
-            rays_d = rays_d.reshape(-1, 3)
-            target = imgs.reshape(-1, 3)
+            i = torch.randint(0, imgs.shape[0], (1,)).item()
+            img = imgs[i]
+            pose = poses[i]
+
+            rays_o, rays_d, target = sample_random_rays(img, pose, H, W, focal, N_rand=1024)
+            rays_o = rays_o.to(device)
+            rays_d = rays_d.to(device)
+            target = target.to(device)
 
             enc_pts = pos_enc(rays_o)
             enc_dirs = dir_enc(rays_d)
