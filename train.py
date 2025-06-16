@@ -19,14 +19,16 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "configs", "default.jso
 
 
 def get_rays(H, W, focal, c2w):
+    device = c2w.device  # automatisch das Gerät von c2w verwenden
+
     i, j = torch.meshgrid(
-        torch.arange(W, dtype=torch.float32),
-        torch.arange(H, dtype=torch.float32),
-        indexing="ij"
+        torch.arange(W, device=device),
+        torch.arange(H, device=device),
+        indexing='xy'
     )
     dirs = torch.stack([(i - W * 0.5) / focal, -(j - H * 0.5) / focal, -torch.ones_like(i)], -1)
-    rays_d = torch.sum(dirs[..., None, :] * c2w[:3, :3], -1)  # Weltkoordinaten
-    rays_o = c2w[:3, 3].expand(rays_d.shape)  # Ursprung überall gleich
+    rays_d = torch.sum(dirs[..., None, :] * c2w[:3, :3], -1)
+    rays_o = c2w[:3, 3].expand(rays_d.shape)
     return rays_o, rays_d
 
 def sample_random_rays(img, pose, H, W, focal, N_rand):
