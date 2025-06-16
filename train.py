@@ -34,7 +34,6 @@ def sample_random_rays(img, pose, H, W, focal, N_rand):
     return rays_o[indices], rays_d[indices], target_rgb[indices]
 
 
-
 def load_config(path: str) -> dict:
     """Load configuration from JSON file."""
 
@@ -63,7 +62,7 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    images, poses, hwf, near, far = load_llff_data(args.data_dir, ...)
+    images, poses, hwf, near, far = load_llff_data(args.data_dir)
 
     if args.near is None:
         args.near = near
@@ -98,12 +97,8 @@ def train(args):
             rays_d = rays_d.to(device)
             target = target.to(device)
 
-            enc_pts = pos_enc(rays_o)
-            enc_dirs = dir_enc(rays_d)
-
             def network(pts, dirs):
-                """Small wrapper so ``render_rays`` can query the model."""
-
+                """Encode inputs and evaluate the NeRF model."""
                 enc_p = pos_enc(pts)
                 enc_d = dir_enc(dirs)
                 return model(enc_p, enc_d)
