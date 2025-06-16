@@ -3,7 +3,9 @@ import json
 import os
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
+
 
 from nerf.model import NeRF, PositionalEncoding
 from nerf.render import render_rays
@@ -63,6 +65,7 @@ def train(args):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     images, poses, hwf, near, far = load_llff_data(args.data_dir)
+    orig_hw = (int(hwf[0]), int(hwf[1]))
 
     if args.near is None:
         args.near = near
@@ -72,8 +75,17 @@ def train(args):
     images, hwf = downsample_data(images, hwf, args.downsample)
     H, W, focal = [int(hw) for hw in hwf]
 
+    if args.downsample and args.downsample > 1:
+        print(
+            f"Downsampled images from {orig_hw[0]}x{orig_hw[1]} to {H}x{W} (factor {args.downsample})"
+        )
+    else:
+        print(f"Using images at {H}x{W} (no downsampling)")
+
     dataset = SimpleDataset(images, poses, hwf)
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
+
+    writer = SummaryWriter(args.log_dir)
 
     # Create network and optimizer
     model, pos_enc, dir_enc = create_network()
@@ -82,8 +94,10 @@ def train(args):
 
     os.makedirs(args.out_dir, exist_ok=True)
 
-    for epoch in range(args.num_epochs):
-        pbar = tqdm(dataloader, desc=f"Epoch {epoch}")
+    epoch_bar = tqdm(range(args.num_epochs), desc="Training", unit="epoch")
+    global_step = 0
+    for epoch in epoch_bar:
+        pbar = tqdm(dataloader, desc=f"Epoch {epoch+1}", leave=False)
         for imgs, poses in pbar:
             imgs = imgs.to(device)
 
@@ -112,10 +126,18 @@ def train(args):
             loss.backward()
             optimizer.step()
 
+            writer.add_scalar("train/loss", loss.item(), global_step)
+            global_step += 1
+
             pbar.set_postfix({"loss": loss.item()})
 
-        ckpt_path = os.path.join(args.out_dir, f"model_{epoch:04d}.pt")
-        torch.save(model.state_dict(), ckpt_path)
+        if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
+            ckpt_path = os.path.join(args.out_dir, f"model_{epoch:04d}.pt")
+            torch.save(model.state_dict(), ckpt_path)
+            print(f"Saved checkpoint to {ckpt_path}")
+        epoch_bar.set_postfix({"loss": loss.item()})
+
+    writer.close()
 
 
 if __name__ == '__main__':
@@ -131,6 +153,10 @@ if __name__ == '__main__':
     parser.add_argument("--num_samples", type=int, default=None)
     parser.add_argument("--downsample", type=int, default=None,
                         help="Downsample factor for input images")
+    parser.add_argument("--log_dir", default="runs",
+                        help="Directory for TensorBoard logs")
+    parser.add_argument("--save_every", type=int, default=None,
+                        help="Save checkpoint every N epochs")
 
     args = parser.parse_args()
 

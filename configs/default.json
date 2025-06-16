@@ -2,7 +2,8 @@
   "batch_size": 128,
   "lr": 0.0005,
   "num_epochs": 2000,
-  "num_samples": 64
+  "num_samples": 64,
+  "log_dir": "runs",
+  "save_every": 500,
+  "downsample": 8
 }
-
-

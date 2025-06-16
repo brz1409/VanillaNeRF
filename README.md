@@ -64,8 +64,15 @@ Important options include:
 - `--lr` – learning rate for the Adam optimiser.
 - `--near` / `--far` – near and far bounds for ray sampling.
 - `--num_samples` – number of points sampled along each ray.
+- `--save_every` – how often (in epochs) to write a checkpoint.
 
-During training the script prints the MSE loss for each batch.  After every epoch a checkpoint named `model_0000.pt`, `model_0001.pt`, ... is written to the output directory.
+During training the script prints the MSE loss for each batch.  Logs are also written for TensorBoard under `--log_dir`.  Start TensorBoard with:
+
+```bash
+tensorboard --logdir runs
+```
+
+Checkpoints are saved every `--save_every` epochs as `model_0000.pt`, `model_0010.pt`, ... in the output directory.
 
 ## Inspecting results
 

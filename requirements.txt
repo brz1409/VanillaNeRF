@@ -3,3 +3,5 @@ numpy
 imageio
 imageio-ffmpeg
 tqdm
+tensorboard
+tensorboard
