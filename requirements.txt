@@ -4,4 +4,4 @@ imageio
 imageio-ffmpeg
 tqdm
 tensorboard
-tensorboard
+six

@@ -64,6 +64,9 @@ def train(args):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    if not os.path.isdir(args.data_dir):
+        raise FileNotFoundError(f"Dataset directory '{args.data_dir}' not found")
+
     images, poses, hwf, near, far = load_llff_data(args.data_dir)
     orig_hw = (int(hwf[0]), int(hwf[1]))
 
@@ -86,6 +89,10 @@ def train(args):
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     writer = SummaryWriter(args.log_dir)
+    print(
+        f"TensorBoard logs at {args.log_dir}. "
+        f"Run `tensorboard --logdir {args.log_dir}` to view."
+    )
 
     # Create network and optimizer
     model, pos_enc, dir_enc = create_network()
@@ -105,8 +112,10 @@ def train(args):
             img = imgs[i]
             pose = poses[i]
 
-            N_rand = args.batch_size  # kommt aus deiner Config oder CLI
-            rays_o, rays_d, target = sample_random_rays(img, pose, H, W, focal, N_rand=N_rand)
+            N_rand = args.num_rays
+            rays_o, rays_d, target = sample_random_rays(
+                img, pose, H, W, focal, N_rand=N_rand
+            )
             rays_o = rays_o.to(device)
             rays_d = rays_d.to(device)
             target = target.to(device)
@@ -131,6 +140,21 @@ def train(args):
 
             pbar.set_postfix({"loss": loss.item()})
 
+    with torch.no_grad():
+        pose = poses[0].to(device)
+        rays_o_full, rays_d_full = get_rays(H, W, focal, pose)
+        rgb_depth = render_rays(
+            network,
+            rays_o_full.reshape(-1, 3),
+            rays_d_full.reshape(-1, 3),
+            args.near,
+            args.far,
+            args.num_samples,
+            rand=False,
+        )
+        img_pred = rgb_depth[:, :3].reshape(H, W, 3).cpu().permute(2, 0, 1)
+        writer.add_image("train/render", img_pred, epoch)
+
         if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
             ckpt_path = os.path.join(args.out_dir, f"model_{epoch:04d}.pt")
             torch.save(model.state_dict(), ckpt_path)
@@ -151,6 +175,12 @@ if __name__ == '__main__':
     parser.add_argument("--near", type=float, default=None)
     parser.add_argument("--far", type=float, default=None)
     parser.add_argument("--num_samples", type=int, default=None)
+    parser.add_argument(
+        "--num_rays",
+        type=int,
+        default=None,
+        help="Number of random rays per image",
+    )
     parser.add_argument("--downsample", type=int, default=None,
                         help="Downsample factor for input images")
     parser.add_argument("--log_dir", default="runs",

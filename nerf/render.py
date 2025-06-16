@@ -59,8 +59,10 @@ def render_rays(
     raw = network_fn(pts_flat, dirs_flat)
     raw = raw.view(*pts.shape[:-1], 4)
 
-    rgb = torch.sigmoid(raw[..., :3])
-    sigma = F.relu(raw[..., 3])
+    # ``network_fn`` is expected to return RGB values in ``[0, 1]`` and
+    # non-negative densities. Avoid applying activations a second time.
+    rgb = raw[..., :3]
+    sigma = raw[..., 3]
     delta = z_vals[..., 1:] - z_vals[..., :-1]
     delta = torch.cat([delta, 1e10 * torch.ones_like(delta[..., :1])], -1)
     alpha = 1.0 - torch.exp(-sigma * delta)
