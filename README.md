@@ -64,12 +64,13 @@ the command line or in a custom config file.
 Important options include:
 
 - `--num_epochs` – number of passes over the training set.
-- `--batch_size` – how many images to load per iteration.
+- `--batch_size` – how many images to load per iteration (default 1).
 - `--lr` – learning rate for the Adam optimiser.
 - `--near` / `--far` – near and far bounds for ray sampling.
 - `--num_samples` – number of points sampled along each ray.
 - `--num_rays` – how many rays to sample from each image.
 - `--save_every` – how often (in epochs) to write a checkpoint.
+- `--eval_index` – which training image to render for monitoring.
 
 During training the script prints the MSE loss for each batch.  Logs are also written for TensorBoard under `--log_dir` including PSNR and learning rate.  Start TensorBoard with:
 
@@ -77,7 +78,9 @@ During training the script prints the MSE loss for each batch.  Logs are also wr
 tensorboard --logdir runs
 ```
 
-The dashboard shows the training loss, PSNR, learning rate curves and a rendered example image for each epoch.
+The dashboard shows the training loss, PSNR, learning rate curves and a rendered
+example image for each epoch. The image is rendered from the camera pose at
+`--eval_index` (0 by default), so you can choose which viewpoint to monitor.
 TensorBoard prints a URL (typically `http://localhost:6006`). Open it in a browser to monitor progress.
 
 Checkpoints are saved every `--save_every` epochs as `model_0000.pt`, `model_0010.pt`, ... in the output directory.

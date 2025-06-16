@@ -87,6 +87,8 @@ def train(args):
         print(f"Using images at {H}x{W} (no downsampling)")
 
     dataset = SimpleDataset(images, poses, hwf)
+    if args.eval_index < 0 or args.eval_index >= len(dataset):
+        raise ValueError(f"eval_index {args.eval_index} is out of range")
     dataloader = DataLoader(dataset, batch_size=args.batch_size, shuffle=True)
 
     writer = SummaryWriter(args.log_dir)
@@ -94,10 +96,13 @@ def train(args):
         f"TensorBoard logs at {args.log_dir}. "
         f"Run `tensorboard --logdir {args.log_dir}` to view."
     )
+    print(f"Rendering evaluation image from index {args.eval_index}")
 
     # Create network and optimizer
     model, pos_enc, dir_enc = create_network()
     model.to(device)
+    pos_enc.to(device)
+    dir_enc.to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
 
     os.makedirs(args.out_dir, exist_ok=True)
@@ -147,7 +152,7 @@ def train(args):
             pbar.set_postfix({"loss": loss.item(), "psnr": psnr.item()})
 
     with torch.no_grad():
-        pose = poses[0].to(device)
+        pose = dataset.poses[args.eval_index].to(device)
         rays_o_full, rays_d_full = get_rays(H, W, focal, pose)
         rgb_depth = render_rays(
             network,
@@ -158,8 +163,13 @@ def train(args):
             args.num_samples,
             rand=False,
         )
-        img_pred = rgb_depth[:, :3].reshape(H, W, 3).cpu().permute(2, 0, 1)
-        writer.add_image("train/render", img_pred, epoch)
+        img_pred = rgb_depth[:, :3].reshape(H, W, 3)
+        writer.add_image("train/render", img_pred.permute(2, 0, 1).cpu(), epoch)
+
+        target_img = dataset.images[args.eval_index].to(device)
+        mse_img = torch.mean((img_pred - target_img) ** 2)
+        psnr_eval = (-10.0 * torch.log10(mse_img))
+        writer.add_scalar("eval/psnr", psnr_eval.item(), epoch)
 
         avg_loss = epoch_loss / len(dataloader)
         writer.add_scalar("epoch/loss", avg_loss, epoch)
@@ -171,7 +181,7 @@ def train(args):
             ckpt_path = os.path.join(args.out_dir, f"model_{epoch:04d}.pt")
             torch.save(model.state_dict(), ckpt_path)
             print(f"Saved checkpoint to {ckpt_path}")
-        epoch_bar.set_postfix({"loss": avg_loss})
+        epoch_bar.set_postfix({"loss": avg_loss, "psnr": psnr_eval.item()})
 
     writer.close()
 
@@ -199,6 +209,8 @@ if __name__ == '__main__':
                         help="Directory for TensorBoard logs")
     parser.add_argument("--save_every", type=int, default=None,
                         help="Save checkpoint every N epochs")
+    parser.add_argument("--eval_index", type=int, default=None,
+                        help="Index of the training image used for TensorBoard renders")
 
     args = parser.parse_args()
 
