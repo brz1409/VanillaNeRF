@@ -1,0 +1,17 @@
+{
+  "config": "configs/default.json",
+  "data_dir": "scene/Simulation_20/",
+  "out_dir": "outputs",
+  "batch_size": 1,
+  "lr": 0.0005,
+  "num_epochs": 100,
+  "near": 3.1506434118273616,
+  "far": 5.098049807536349,
+  "num_samples": 128,
+  "num_rays": 8192,
+  "downsample": 4,
+  "log_dir": "runs",
+  "save_every": 100,
+  "eval_index": 10,
+  "run_name": "Simulation_20_20250616-145516"
+}
