@@ -1,5 +1,7 @@
 # Vanilla NeRF
 
+![NeRF Batch Size Comparison](nerf_simulation_parallel.gif)
+
 This repository implements a compact version of **Neural Radiance Fields** (NeRF) in PyTorch.  It is intended as an educational resource that exposes all moving parts of a basic NeRF setup with clear code and extensive comments.
 
 The project covers the full pipeline from loading an LLFF dataset with `poses_bounds.npy` to training a network that synthesises new views of the scene.
