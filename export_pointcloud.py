@@ -16,11 +16,11 @@ logger = logging.getLogger(__name__)
 import numpy as np
 import torch
 
-from data.dataset import load_llff_data, downsample_data
+from data.dataset import load_llff_data
 from nerf.model import NeRF, PositionalEncoding
 
 
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cpu")
 
 
 def get_rays(H: int, W: int, focal: float, c2w: torch.Tensor):
@@ -154,12 +154,17 @@ def extract_pointcloud(
 
 
 def main(args):
-    logger.info("Loading data from %s", args.data_dir)
+    global device
+    if args.device:
+        device = torch.device(args.device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    logger.info("Using device: %s", device)
 
-def main(args):
-    images, poses, hwf, near, far = load_llff_data(args.data_dir)
-    logger.info("Downsampling images by factor %d", args.downsample)
-    images, hwf = downsample_data(images, hwf, args.downsample)
+    logger.info("Loading data from %s", args.data_dir)
+    images, poses, hwf, near, far = load_llff_data(
+        args.data_dir, downsample=args.downsample, save_downsampled=True
+    )
 
     logger.info("Loading model checkpoint %s", args.checkpoint)
     model = NeRF()
@@ -201,4 +206,5 @@ if __name__ == "__main__":
     parser.add_argument("--n_rays", type=int, default=500000, help="Total rays to sample")
     parser.add_argument("--weight_threshold", type=float, default=0.1, help="Keep points with weight > threshold")
     parser.add_argument("--cam_ids", type=int, nargs="*", default=None, help="Optional list of camera indices")
+    parser.add_argument("--device", default=None, help="Torch device to use (e.g. 'cuda' or 'cpu')")
     main(parser.parse_args())

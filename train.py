@@ -14,7 +14,7 @@ from tqdm import tqdm
 
 from nerf.model import NeRF, PositionalEncoding
 from nerf.render import render_rays
-from data.dataset import SimpleDataset, load_llff_data, downsample_data
+from data.dataset import SimpleDataset, load_llff_data
 
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "configs", "default.json")
@@ -83,15 +83,16 @@ def train(args):
     if not os.path.isdir(args.data_dir):
         raise FileNotFoundError(f"Dataset directory '{args.data_dir}' not found")
 
-    images, poses, hwf, near, far = load_llff_data(args.data_dir)
-    orig_hw = (int(hwf[0]), int(hwf[1]))
+    images, poses, hwf, near, far = load_llff_data(
+        args.data_dir, downsample=args.downsample, save_downsampled=True
+    )
+    orig_hw = (int(hwf[0] * (args.downsample or 1)), int(hwf[1] * (args.downsample or 1)))
 
     if args.near is None:
         args.near = near
     if args.far is None:
         args.far = far
 
-    images, hwf = downsample_data(images, hwf, args.downsample)
     H, W, focal = [int(hw) for hw in hwf]
 
     if args.downsample and args.downsample > 1:

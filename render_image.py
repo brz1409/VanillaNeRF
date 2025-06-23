@@ -6,7 +6,7 @@ import imageio
 import yaml
 import os
 
-from data.dataset import load_llff_data, downsample_data
+from data.dataset import load_llff_data
 from nerf.model import NeRF, PositionalEncoding
 from nerf.render import render_rays
 from train import get_rays
@@ -29,18 +29,19 @@ def main(args):
     print(f"Verwende Downsampling-Faktor: {downsample}")
 
     print(f"Starte Rendering mit Daten aus: {args.data_dir}")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if args.device:
+        device = torch.device(args.device)
+    else:
+        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Verwende Gerät: {device}")
 
     print("Lade Daten ...")
     # ``load_llff_data`` reads images and camera poses from the specified
     # directory. The function also returns suggested near and far bounds.
-    images, poses, hwf, near, far = load_llff_data(args.data_dir)
+    images, poses, hwf, near, far = load_llff_data(
+        args.data_dir, downsample=downsample, save_downsampled=True
+    )
     print("Daten geladen.")
-
-    print(f"Downsampling mit Faktor {downsample} ...")
-    images, hwf = downsample_data(images, hwf, downsample)
-    print("Downsampling abgeschlossen.")
 
     H, W, focal = [int(x) for x in hwf]
     print(f"Bildgröße: {H}x{W}, Fokal: {focal}")
@@ -93,4 +94,5 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="render.png")
     parser.add_argument("--downsample", type=int, default=4)
     parser.add_argument("--num_samples", type=int, default=64)
+    parser.add_argument("--device", default=None, help="Torch device to use")
     main(parser.parse_args())

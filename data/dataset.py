@@ -57,13 +57,25 @@ def _find_images(image_dir: str) -> List[str]:
     return [os.path.join(image_dir, f) for f in files]
 
 
-def load_llff_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int, float], float, float]:
+def load_llff_data(
+    basedir: str,
+    *,
+    downsample: int | None = None,
+    save_downsampled: bool = False,
+) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int, float], float, float]:
     """Load images and camera data from an LLFF dataset.
 
     Parameters
     ----------
     basedir: str
         Directory containing ``poses_bounds.npy`` and an ``images`` folder.
+    downsample: int or None, optional
+        If given and ``> 1``, load images from ``images_<downsample>`` if the
+        directory exists. Otherwise the original images are loaded and
+        downsampled on the fly. When ``save_downsampled`` is ``True`` the
+        downsampled images are written to this directory for future use.
+    save_downsampled: bool, optional
+        Whether to save newly created downsampled images to disk.
 
     Returns
     -------
@@ -97,8 +109,13 @@ def load_llff_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int
     )
 
     img_dir = os.path.join(basedir, "images")
+    ds_dir = None
+    if downsample is not None and downsample > 1:
+        ds_dir = os.path.join(basedir, f"images_{downsample}")
+        if os.path.exists(ds_dir):
+            img_dir = ds_dir
     if not os.path.exists(img_dir):
-        # Some datasets ship only downsampled image folders (e.g. ``images_4``).
+        # Some datasets ship only downsampled image folders.
         for name in sorted(os.listdir(basedir)):
             if name.startswith("images_"):
                 img_dir = os.path.join(basedir, name)
@@ -107,6 +124,14 @@ def load_llff_data(basedir: str) -> Tuple[np.ndarray, np.ndarray, Tuple[int, int
     # Read all images into a single ``(N, H, W, 3)`` array.
     img_files = _find_images(img_dir)
     images = np.stack([imageio.v2.imread(f) for f in img_files], axis=0)
+
+    if downsample is not None and downsample > 1 and img_dir != ds_dir:
+        images, hwf = downsample_data(images, tuple(hwf), downsample)
+        if save_downsampled and ds_dir is not None:
+            os.makedirs(ds_dir, exist_ok=True)
+            for src, img in zip(img_files, images):
+                out_path = os.path.join(ds_dir, os.path.basename(src))
+                imageio.v2.imwrite(out_path, img)
 
     # Provide slightly tighter near/far bounds to avoid numerical issues.
     near = float(bds.min() * 0.9)
