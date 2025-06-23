@@ -1,3 +1,5 @@
+"""Utility script to render a single image from a trained NeRF model."""
+
 import argparse
 import torch
 import imageio
@@ -10,15 +12,19 @@ from nerf.render import render_rays
 from train import get_rays
 
 def load_config(config_path):
+    """Load a YAML configuration file if it exists."""
+
     if os.path.exists(config_path):
-        with open(config_path, "r") as f:
+        with open(config_path, "r", encoding="utf-8") as f:
             return yaml.safe_load(f)
     return {}
 
 def main(args):
-    # Konfiguration laden
+    """Render an image from the first camera pose in ``args.data_dir``."""
+
+    # Configuration may specify a default downsampling factor. Command line
+    # arguments take precedence if provided.
     config = load_config(os.path.join(args.data_dir, "config.yaml"))
-    # Downsample aus config übernehmen, falls nicht per Argument gesetzt
     downsample = args.downsample if args.downsample != 1 else config.get("downsample", 1)
     print(f"Verwende Downsampling-Faktor: {downsample}")
 
@@ -27,6 +33,8 @@ def main(args):
     print(f"Verwende Gerät: {device}")
 
     print("Lade Daten ...")
+    # ``load_llff_data`` reads images and camera poses from the specified
+    # directory. The function also returns suggested near and far bounds.
     images, poses, hwf, near, far = load_llff_data(args.data_dir)
     print("Daten geladen.")
 
@@ -70,7 +78,10 @@ def main(args):
         )
     print("Rendering abgeschlossen.")
 
+    # ``render_rays`` returns RGB, depth and opacity. We only need the colors
+    # for saving an image.
     rgb = rgb_depth_acc[:, :3].reshape(H, W, 3).cpu().numpy()
+
     print(f"Speichere Bild unter: {args.output}")
     imageio.imwrite(args.output, (rgb * 255).astype("uint8"))
     print("Fertig.")

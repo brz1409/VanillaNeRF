@@ -1,3 +1,5 @@
+"""Training script for Vanilla NeRF."""
+
 import argparse
 import json
 import math
@@ -19,19 +21,25 @@ DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "configs", "default.jso
 
 
 def get_rays(H, W, focal, c2w):
-    device = c2w.device  # automatisch das Gerät von c2w verwenden
+    """Generate ray origins and directions for all pixels in an image."""
+
+    device = c2w.device  # automatically use the pose's device
 
     i, j = torch.meshgrid(
         torch.arange(W, device=device),
         torch.arange(H, device=device),
-        indexing='xy'
+        indexing="xy",
     )
-    dirs = torch.stack([(i - W * 0.5) / focal, -(j - H * 0.5) / focal, -torch.ones_like(i)], -1)
+    dirs = torch.stack(
+        [(i - W * 0.5) / focal, -(j - H * 0.5) / focal, -torch.ones_like(i)], -1
+    )
     rays_d = torch.sum(dirs[..., None, :] * c2w[:3, :3], -1)
     rays_o = c2w[:3, 3].expand(rays_d.shape)
     return rays_o, rays_d
 
 def sample_random_rays(img, pose, H, W, focal, N_rand):
+    """Sample ``N_rand`` random pixels from ``img`` and return their rays."""
+
     rays_o, rays_d = get_rays(H, W, focal, pose)
     rays_o = rays_o.reshape(-1, 3)
     rays_d = rays_d.reshape(-1, 3)
@@ -44,6 +52,7 @@ def sample_random_rays(img, pose, H, W, focal, N_rand):
 def load_config(path: str) -> dict:
     """Load configuration from JSON file."""
 
+    # Using JSON keeps the configuration human readable and easy to edit.
     with open(path, "r", encoding="utf-8") as f:
         return json.load(f)
 
@@ -140,6 +149,7 @@ def train(args):
             rays_o, rays_d, target = sample_random_rays(
                 img, pose, H, W, focal, N_rand=N_rand
             )
+            # Diagnostic printout to keep track of progress and randomness.
             print(f"Sampled {N_rand} random rays for epoch {epoch + 1}, batch step {global_step}")
 
             rays_o = rays_o.to(device)
@@ -185,6 +195,7 @@ def train(args):
                 imageio.imwrite(
                     img_path, (img_pred.cpu().numpy() * 255).astype("uint8")
                 )
+                # Save a rendered image for visual inspection of progress.
                 print(f"Saved evaluation image to {img_path}")
 
             target_img = dataset.images[args.eval_index].to(device)
@@ -203,6 +214,7 @@ def train(args):
             if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
                 ckpt_path = os.path.join(out_dir, f"model_{epoch:04d}.pt")
                 torch.save(model.state_dict(), ckpt_path)
+                # Checkpoints allow resuming training or rendering later on.
                 print(f"Saved checkpoint to {ckpt_path}")
             epoch_bar.set_postfix({"loss": avg_loss, "psnr": psnr_eval.item()})
 

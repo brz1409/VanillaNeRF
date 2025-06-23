@@ -40,17 +40,27 @@ def render_rays(
     """
 
     device = rays_o.device
+
+    # ``t_vals`` are uniformly spaced sample positions between 0 and 1 that will
+    # later be scaled to the ``[near, far]`` range.
     t_vals = torch.linspace(0.0, 1.0, steps=num_samples, device=device)
     if rand:
-        # Stratified sampling in depth to reduce artifacts
+        # Stratified sampling in depth to reduce aliasing artifacts. We jitter
+        # each bin by a random amount within its interval.
         mids = 0.5 * (t_vals[:-1] + t_vals[1:])
         upper = torch.cat([mids, t_vals[-1:]], -1)
         lower = torch.cat([t_vals[:1], mids], -1)
         t_vals = lower + (upper - lower) * torch.rand_like(t_vals)
 
     # Sample 3D points uniformly between near and far bounds
+    # Convert normalized ``t_vals`` to actual depth values.
     z_vals = near * (1.0 - t_vals) + far * t_vals
+
+    # Compute the 3D sample positions along each ray.
     pts = rays_o[..., None, :] + rays_d[..., None, :] * z_vals[..., :, None]
+
+    # Viewing directions are constant along a ray but we expand them to match
+    # the sampled points so we can feed them to the network.
     dirs = rays_d[..., None, :].expand_as(pts)
 
     # Query the NeRF network
@@ -67,12 +77,17 @@ def render_rays(
     delta = torch.cat([delta, 1e10 * torch.ones_like(delta[..., :1])], -1)
     alpha = 1.0 - torch.exp(-sigma * delta)
 
-    # Accumulate colors along each ray using alpha compositing
+    # Accumulate colors along each ray using alpha compositing. ``weights``
+    # correspond to the contribution of each sample to the final pixel color.
     weights = alpha * torch.cumprod(
         torch.cat([torch.ones_like(alpha[..., :1]), 1.0 - alpha + 1e-10], -1), -1
     )[..., :-1]
+
+    # Weighted sums yield the rendered RGB values, depth and total opacity.
     rgb_map = (weights[..., None] * rgb).sum(dim=-2)
     depth_map = (weights * z_vals).sum(dim=-1)
     acc_map = weights.sum(dim=-1)
 
+    # Return a tensor of shape ``(N_rays, 5)`` containing RGB color, depth and
+    # accumulated opacity for each input ray.
     return torch.cat([rgb_map, depth_map[..., None], acc_map[..., None]], -1)
