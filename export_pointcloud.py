@@ -6,8 +6,12 @@ high density contribution and writes them to a binary PLY file.
 """
 
 import argparse
+import logging
 from pathlib import Path
 from typing import Optional, Sequence
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
 
 import numpy as np
 import torch
@@ -110,10 +114,13 @@ def extract_pointcloud(
         poses = poses[cam_ids]
     rays_per_image = int(np.ceil(n_rays / poses.shape[0]))
 
+    logger.info("Sampling %d rays per image from %d poses", rays_per_image, poses.shape[0])
+
     all_xyz = []
     all_rgb = []
 
-    for c2w in poses:
+    for idx, c2w in enumerate(poses):
+        logger.info("Processing camera %d/%d", idx + 1, poses.shape[0])
         c2w = torch.from_numpy(c2w).to(device)
         rays_o, rays_d = get_rays(H, W, focal, c2w)
         rays_o = rays_o.reshape(-1, 3)
@@ -131,22 +138,34 @@ def extract_pointcloud(
         if mask.any():
             all_xyz.append(pts[mask].cpu().numpy())
             all_rgb.append(rgb[mask].cpu().numpy())
+        logger.info(
+            "  Kept %d/%d points from this view",
+            mask.sum().item(),
+            mask.numel(),
+        )
 
     if not all_xyz:
         return np.zeros((0, 3)), np.zeros((0, 3))
 
     xyz = np.concatenate(all_xyz, axis=0)
     rgb = np.concatenate(all_rgb, axis=0)
+    logger.info("Total points collected: %d", xyz.shape[0])
     return xyz, rgb
 
 
 def main(args):
+    logger.info("Loading data from %s", args.data_dir)
+
+def main(args):
     images, poses, hwf, near, far = load_llff_data(args.data_dir)
+    logger.info("Downsampling images by factor %d", args.downsample)
     images, hwf = downsample_data(images, hwf, args.downsample)
 
+    logger.info("Loading model checkpoint %s", args.checkpoint)
     model = NeRF()
     model.load_state_dict(torch.load(args.checkpoint, map_location=device))
     model.to(device).eval()
+    logger.info("Model loaded. Extracting point cloud ...")
 
     pos_enc = PositionalEncoding(10).to(device)
     dir_enc = PositionalEncoding(4).to(device)
@@ -165,8 +184,9 @@ def main(args):
         weight_threshold=args.weight_threshold,
         cam_ids=args.cam_ids,
     )
-
+    logger.info("Writing %d points to %s", xyz.shape[0], args.output)
     write_ply(Path(args.output), xyz, rgb)
+    logger.info("Point cloud export finished")
 
 
 if __name__ == "__main__":
