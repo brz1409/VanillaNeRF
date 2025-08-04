@@ -118,6 +118,46 @@ colour_depth_acc = render_rays(
 
 The dataset loader and training script are intentionally simple, so you can easily modify them for your own experiments.
 
+## Refraction-aware training and point cloud export
+
+The repository can model scenes that contain a planar water surface. Rays
+crossing the interface between air and water are bent according to Snell's
+law and routed through separate NeRF networks for each medium. The height of
+the water surface is treated as a learnable parameter and is optimised
+jointly with the networks.
+
+### Training with refraction
+
+Enable refraction-aware training by specifying the refractive indices of air
+and water and an initial guess for the water level. The script will optimise
+both NeRFs and the water surface height:
+
+```bash
+python train.py --data_dir ./my_scene \\
+    --water_level 0.0 --n_air 1.0 --n_water 1.333
+```
+
+During training, checkpoints are written for the two networks
+(`air_model_XXXX.pt` and `water_model_XXXX.pt`) as well as the estimated water
+level (`water_level_XXXX.pt`). The saved water level can be loaded via
+`torch.load(checkpoint)['water_level']`.
+
+### Exporting a refraction-corrected point cloud
+
+After training, a point cloud that accounts for refraction can be extracted by
+providing the two network checkpoints and the learned water level:
+
+```bash
+python export_pointcloud.py --data_dir ./my_scene \\
+    --air_checkpoint outputs/<run>/air_model_0099.pt \\
+    --water_checkpoint outputs/<run>/water_model_0099.pt \\
+    --water_level <value> --output corrected.ply
+```
+
+Adjust `--n_rays`, `--num_samples` and `--weight_threshold` to control the
+density and quality of the exported cloud. The resulting `corrected.ply` can be
+viewed in standard 3D software.
+
 ## Repository structure
 
 - `data/` – dataset utilities including `load_llff_data`, `downsample_data` and `SimpleDataset`.
