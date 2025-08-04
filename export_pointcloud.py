@@ -18,6 +18,7 @@ import torch
 
 from data.dataset import load_llff_data
 from nerf.model import NeRF, PositionalEncoding
+from nerf.refraction import refract_rays
 
 
 device = torch.device("cpu")
@@ -98,12 +99,16 @@ def render_samples(network, rays_o, rays_d, near, far, num_samples):
 
 @torch.no_grad()
 def extract_pointcloud(
-    network,
+    network_air,
+    network_water,
     poses: np.ndarray,
     hwf,
     near: float,
     far: float,
     *,
+    water_level: torch.Tensor,
+    n_air: float,
+    n_water: float,
     n_rays: int,
     num_samples: int,
     weight_threshold: float,
@@ -129,7 +134,22 @@ def extract_pointcloud(
         rays_o = rays_o[sel]
         rays_d = rays_d[sel]
 
-        rgb, weights, pts = render_samples(network, rays_o, rays_d, near, far, num_samples)
+        mask, refr_o, refr_d = refract_rays(
+            rays_o, rays_d, water_level, n_air, n_water
+        )
+        rgb = torch.zeros(rays_o.shape[0], num_samples, 3, device=device)
+        weights = torch.zeros(rays_o.shape[0], num_samples, device=device)
+        pts = torch.zeros(rays_o.shape[0], num_samples, 3, device=device)
+        if (~mask).any():
+            rgb_a, w_a, p_a = render_samples(
+                network_air, rays_o[~mask], rays_d[~mask], near, far, num_samples
+            )
+            rgb[~mask], weights[~mask], pts[~mask] = rgb_a, w_a, p_a
+        if mask.any():
+            rgb_w, w_w, p_w = render_samples(
+                network_water, refr_o, refr_d, near, far, num_samples
+            )
+            rgb[mask], weights[mask], pts[mask] = rgb_w, w_w, p_w
         rgb = rgb.reshape(-1, 3)
         w = weights.reshape(-1)
         pts = pts.reshape(-1, 3)
@@ -166,24 +186,38 @@ def main(args):
         args.data_dir, downsample=args.downsample, save_downsampled=True
     )
 
-    logger.info("Loading model checkpoint %s", args.checkpoint)
-    model = NeRF()
-    model.load_state_dict(torch.load(args.checkpoint, map_location=device))
-    model.to(device).eval()
-    logger.info("Model loaded. Extracting point cloud ...")
+    logger.info("Loading air model checkpoint %s", args.air_checkpoint)
+    air_model = NeRF()
+    air_model.load_state_dict(torch.load(args.air_checkpoint, map_location=device))
+    air_model.to(device).eval()
+    logger.info("Loading water model checkpoint %s", args.water_checkpoint)
+    water_model = NeRF()
+    water_model.load_state_dict(torch.load(args.water_checkpoint, map_location=device))
+    water_model.to(device).eval()
+    water_level = torch.tensor(args.water_level, device=device)
+    logger.info("Models loaded. Extracting point cloud ...")
 
-    pos_enc = PositionalEncoding(10).to(device)
-    dir_enc = PositionalEncoding(4).to(device)
+    air_pos_enc = PositionalEncoding(10).to(device)
+    air_dir_enc = PositionalEncoding(4).to(device)
+    water_pos_enc = PositionalEncoding(10).to(device)
+    water_dir_enc = PositionalEncoding(4).to(device)
 
-    def network(pts, dirs):
-        return model(pos_enc(pts), dir_enc(dirs))
+    def network_air(pts, dirs):
+        return air_model(air_pos_enc(pts), air_dir_enc(dirs))
+
+    def network_water(pts, dirs):
+        return water_model(water_pos_enc(pts), water_dir_enc(dirs))
 
     xyz, rgb = extract_pointcloud(
-        network,
+        network_air,
+        network_water,
         poses,
         hwf,
         near,
         far,
+        water_level=water_level,
+        n_air=args.n_air,
+        n_water=args.n_water,
         n_rays=args.n_rays,
         num_samples=args.num_samples,
         weight_threshold=args.weight_threshold,
@@ -199,7 +233,11 @@ if __name__ == "__main__":
         description="Export a colored point cloud from a trained NeRF model."
     )
     parser.add_argument("--data_dir", required=True, help="Path to dataset")
-    parser.add_argument("--checkpoint", required=True, help="Model checkpoint")
+    parser.add_argument("--air_checkpoint", required=True, help="Air model checkpoint")
+    parser.add_argument("--water_checkpoint", required=True, help="Water model checkpoint")
+    parser.add_argument("--water_level", type=float, default=0.0, help="Water surface height")
+    parser.add_argument("--n_air", type=float, default=1.0, help="Refractive index of air")
+    parser.add_argument("--n_water", type=float, default=1.333, help="Refractive index of water")
     parser.add_argument("--output", default="pointcloud.ply", help="Output PLY file")
     parser.add_argument("--downsample", type=int, default=4, help="Image downsampling factor")
     parser.add_argument("--num_samples", type=int, default=64, help="Samples per ray")
