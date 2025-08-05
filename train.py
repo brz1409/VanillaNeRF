@@ -4,6 +4,7 @@ import argparse
 import json
 import math
 import os
+import logging
 import torch
 import imageio
 from torch.utils.data import DataLoader
@@ -16,6 +17,10 @@ from nerf.model import NeRF, PositionalEncoding
 from nerf.render import render_rays
 from nerf.refraction import refract_rays
 from data.dataset import SimpleDataset, load_llff_data
+
+
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger(__name__)
 
 
 DEFAULT_CONFIG = os.path.join(os.path.dirname(__file__), "configs", "default.json")
@@ -97,11 +102,16 @@ def train(args):
     H, W, focal = [int(hw) for hw in hwf]
 
     if args.downsample and args.downsample > 1:
-        print(
-            f"Downsampled images from {orig_hw[0]}x{orig_hw[1]} to {H}x{W} (factor {args.downsample})"
+        logger.info(
+            "Downsampled images from %dx%d to %dx%d (factor %d)",
+            orig_hw[0],
+            orig_hw[1],
+            H,
+            W,
+            args.downsample,
         )
     else:
-        print(f"Using images at {H}x{W} (no downsampling)")
+        logger.info("Using images at %dx%d (no downsampling)", H, W)
 
     dataset = SimpleDataset(images, poses, hwf)
     if args.eval_index < 0 or args.eval_index >= len(dataset):
@@ -111,11 +121,12 @@ def train(args):
     log_dir = os.path.join(args.log_dir, run_name)
     os.makedirs(log_dir, exist_ok=True)
     writer = SummaryWriter(log_dir)
-    print(
-        f"TensorBoard logs at {log_dir}. "
-        f"Run `tensorboard --logdir {args.log_dir}` to view."
+    logger.info(
+        "TensorBoard logs at %s. Run `tensorboard --logdir %s` to view.",
+        log_dir,
+        args.log_dir,
     )
-    print(f"Rendering evaluation image from index {args.eval_index}")
+    logger.info("Rendering evaluation image from index %d", args.eval_index)
 
     # Create network(s) and optimizer
     if args.use_refraction:

@@ -7,6 +7,7 @@ wrap them in a :class:`torch.utils.data.Dataset` for training.
 from __future__ import annotations
 
 import os
+import logging
 from typing import Tuple, List
 
 import imageio
@@ -14,6 +15,9 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset
 import torch.nn.functional as F
+
+
+logger = logging.getLogger(__name__)
 
 
 class SimpleDataset(Dataset):
@@ -92,7 +96,9 @@ def load_llff_data(
     # ``poses_bounds.npy`` stores both camera extrinsics and the recommended
     # near/far bounds.  We reshape the array into ``(N, 3, 5)`` where each row
     # contains a 3x5 matrix [R|t|hwf].
-    poses_bounds = np.load(os.path.join(basedir, "poses_bounds.npy"))
+    poses_path = os.path.join(basedir, "poses_bounds.npy")
+    poses_bounds = np.load(poses_path)
+    logger.info("Loaded poses and bounds from %s", poses_path)
     poses_arr = poses_bounds[:, :-2].reshape([-1, 3, 5])
     bds = poses_bounds[:, -2:]
 
@@ -100,13 +106,16 @@ def load_llff_data(
     hwf = poses_arr[0, :, 4].astype(np.float32)
 
     # Extract the camera matrices (3x4). LLFF uses a different coordinate
-    # system than PyTorch3D, so we re-arrange the axes to match the NeRF
-    # convention.
+    # system than PyTorch3D. We rotate the axes to match the NeRF convention.
     poses = poses_arr[..., :4].astype(np.float32)
-    poses = np.stack(
-        [poses[:, :, 1], -poses[:, :, 0], poses[:, :, 2], poses[:, :, 3]],
-        axis=-1,
-    )
+    rot = np.array([[0, 1, 0], [-1, 0, 0], [0, 0, 1]], dtype=np.float32)
+    logger.info("Applying rotation (x,y,z)->(y,-x,z) with matrix:\n%s", rot)
+    R = poses[..., :3]
+    t = poses[..., 3:]
+    R = R @ rot.T
+    poses = np.concatenate([R, t], axis=-1)
+    logger.info("First pose before rotation:\n%s", poses_arr[0, :, :4])
+    logger.info("First pose after rotation:\n%s", poses[0])
 
     img_dir = os.path.join(basedir, "images")
     ds_dir = None
@@ -134,8 +143,12 @@ def load_llff_data(
                 imageio.v2.imwrite(out_path, img)
 
     # Provide slightly tighter near/far bounds to avoid numerical issues.
-    near = float(bds.min() * 0.9)
-    far = float(bds.max() * 1.0)
+    orig_near = float(bds.min())
+    orig_far = float(bds.max())
+    near = float(orig_near * 0.9)
+    far = float(orig_far * 1.0)
+    logger.info("Near bound scaled from %.4f to %.4f", orig_near, near)
+    logger.info("Far  bound scaled from %.4f to %.4f", orig_far, far)
 
     return images, poses, tuple(hwf), near, far
 
@@ -146,6 +159,14 @@ def downsample_data(images: np.ndarray, hwf: Tuple[int, int, float], factor: int
     # Early exit if no downsampling is requested.
     if factor is None or factor <= 1:
         return images, hwf
+
+    logger.info(
+        "Downsampling images by factor %d (from %dx%d, focal %.3f)",
+        factor,
+        images.shape[1],
+        images.shape[2],
+        hwf[2],
+    )
 
     # Convert ``(N, H, W, C)`` array to ``(N, C, H, W)`` tensor for interpolation.
     img_t = torch.from_numpy(images).permute(0, 3, 1, 2).float()
@@ -163,5 +184,11 @@ def downsample_data(images: np.ndarray, hwf: Tuple[int, int, float], factor: int
 
     # Adjust focal length along with height and width.
     new_hwf = (h, w, hwf[2] / factor)
+    logger.info(
+        "Resulting resolution %dx%d, focal %.3f",
+        h,
+        w,
+        new_hwf[2],
+    )
     return img_t, new_hwf
 
