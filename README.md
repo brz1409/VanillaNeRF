@@ -78,6 +78,11 @@ Important options include:
 - `--save_every` – how often (in epochs) to write a checkpoint.
 - `--eval_index` – which training image to render for monitoring.
 - `--log_dir` – base directory for TensorBoard logs.
+- `--use_refraction` – set to `1` for refraction-aware training or `0` for a vanilla NeRF.
+
+By default the provided configuration trains a refraction-aware model. To train
+a standard NeRF instead, pass `--use_refraction 0` on the command line or set
+`"use_refraction": false` in a custom config file.
 
 During training the script prints the MSE loss for each batch.  Logs are also written for TensorBoard under `--log_dir` including PSNR and learning rate.  Start TensorBoard with:
 
@@ -128,12 +133,12 @@ jointly with the networks.
 
 ### Training with refraction
 
-Enable refraction-aware training by specifying the refractive indices of air
-and water and an initial guess for the water level. The script will optimise
-both NeRFs and the water surface height:
+Refraction-aware training is enabled when `use_refraction` is set to `1`.
+Specify the refractive indices of air and water and an initial guess for the
+water level. The script will optimise both NeRFs and the water surface height:
 
 ```bash
-python train.py --data_dir ./my_scene \\
+python train.py --data_dir ./my_scene --use_refraction 1 \\
     --water_level 0.0 --n_air 1.0 --n_water 1.333
 ```
 

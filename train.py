@@ -117,33 +117,49 @@ def train(args):
     )
     print(f"Rendering evaluation image from index {args.eval_index}")
 
-    # Create network and optimizer
-    air_model, air_pos_enc, air_dir_enc = create_network()
-    water_model, water_pos_enc, water_dir_enc = create_network()
-    air_model.to(device)
-    water_model.to(device)
-    air_pos_enc.to(device)
-    water_pos_enc.to(device)
-    air_dir_enc.to(device)
-    water_dir_enc.to(device)
-    water_level = torch.nn.Parameter(torch.tensor(args.water_level, device=device))
-    params = list(air_model.parameters()) + list(water_model.parameters()) + [water_level]
-    optimizer = torch.optim.Adam(params, lr=args.lr)
+    # Create network(s) and optimizer
+    if args.use_refraction:
+        air_model, air_pos_enc, air_dir_enc = create_network()
+        water_model, water_pos_enc, water_dir_enc = create_network()
+        air_model.to(device)
+        water_model.to(device)
+        air_pos_enc.to(device)
+        water_pos_enc.to(device)
+        air_dir_enc.to(device)
+        water_dir_enc.to(device)
+        water_level = torch.nn.Parameter(torch.tensor(args.water_level, device=device))
+        params = (
+            list(air_model.parameters())
+            + list(water_model.parameters())
+            + [water_level]
+        )
+        optimizer = torch.optim.Adam(params, lr=args.lr)
+
+        def network_air(pts, dirs):
+            enc_p = air_pos_enc(pts)
+            enc_d = air_dir_enc(dirs)
+            return air_model(enc_p, enc_d)
+
+        def network_water(pts, dirs):
+            enc_p = water_pos_enc(pts)
+            enc_d = water_dir_enc(dirs)
+            return water_model(enc_p, enc_d)
+    else:
+        model, pos_enc, dir_enc = create_network()
+        model.to(device)
+        pos_enc.to(device)
+        dir_enc.to(device)
+        optimizer = torch.optim.Adam(model.parameters(), lr=args.lr)
+
+        def network(pts, dirs):
+            enc_p = pos_enc(pts)
+            enc_d = dir_enc(dirs)
+            return model(enc_p, enc_d)
 
     out_dir = os.path.join(args.out_dir, run_name)
     os.makedirs(out_dir, exist_ok=True)
     with open(os.path.join(out_dir, "config.json"), "w", encoding="utf-8") as f:
         json.dump(vars(args), f, indent=2)
-
-    def network_air(pts, dirs):
-        enc_p = air_pos_enc(pts)
-        enc_d = air_dir_enc(dirs)
-        return air_model(enc_p, enc_d)
-
-    def network_water(pts, dirs):
-        enc_p = water_pos_enc(pts)
-        enc_d = water_dir_enc(dirs)
-        return water_model(enc_p, enc_d)
 
     epoch_bar = tqdm(range(args.num_epochs), desc="Training", unit="epoch")
     global_step = 0
@@ -160,7 +176,7 @@ def train(args):
             N_rand = args.num_rays
             rays_o, rays_d, target = sample_random_rays(
                 img, pose, H, W, focal, N_rand=N_rand
-            )
+            )  # identical sampling regardless of refraction mode
             # Diagnostic printout to keep track of progress and randomness.
             print(f"Sampled {N_rand} random rays for epoch {epoch + 1}, batch step {global_step}")
 
@@ -168,30 +184,40 @@ def train(args):
             rays_d = rays_d.to(device)
             target = target.to(device)
 
-            mask, refr_o, refr_d = refract_rays(
-                rays_o, rays_d, water_level, args.n_air, args.n_water
-            )
-            outputs = torch.zeros(rays_o.shape[0], 5, device=device)
-            if (~mask).any():
-                out_air = render_rays(
-                    network_air,
-                    rays_o[~mask],
-                    rays_d[~mask],
+            if args.use_refraction:
+                mask, refr_o, refr_d = refract_rays(
+                    rays_o, rays_d, water_level, args.n_air, args.n_water
+                )
+                outputs = torch.zeros(rays_o.shape[0], 5, device=device)
+                if (~mask).any():
+                    out_air = render_rays(
+                        network_air,
+                        rays_o[~mask],
+                        rays_d[~mask],
+                        args.near,
+                        args.far,
+                        args.num_samples,
+                    )
+                    outputs[~mask] = out_air
+                if mask.any():
+                    out_water = render_rays(
+                        network_water,
+                        refr_o,
+                        refr_d,
+                        args.near,
+                        args.far,
+                        args.num_samples,
+                    )
+                    outputs[mask] = out_water
+            else:
+                outputs = render_rays(
+                    network,
+                    rays_o,
+                    rays_d,
                     args.near,
                     args.far,
                     args.num_samples,
                 )
-                outputs[~mask] = out_air
-            if mask.any():
-                out_water = render_rays(
-                    network_water,
-                    refr_o,
-                    refr_d,
-                    args.near,
-                    args.far,
-                    args.num_samples,
-                )
-                outputs[mask] = out_water
             pred_rgb = outputs[:, :3]
             loss = torch.mean((pred_rgb - target) ** 2)
             psnr = -10.0 * torch.log10(loss)
@@ -212,25 +238,36 @@ def train(args):
             rays_o_full, rays_d_full = get_rays(H, W, focal, pose)
             rays_o_full = rays_o_full.reshape(-1, 3)
             rays_d_full = rays_d_full.reshape(-1, 3)
-            mask, refr_o_full, refr_d_full = refract_rays(
-                rays_o_full, rays_d_full, water_level, args.n_air, args.n_water
-            )
-            rgb_depth = torch.zeros(rays_o_full.shape[0], 5, device=device)
-            if (~mask).any():
-                rgb_depth[~mask] = render_rays(
-                    network_air,
-                    rays_o_full[~mask],
-                    rays_d_full[~mask],
-                    args.near,
-                    args.far,
-                    args.num_samples,
-                    rand=False,
+            if args.use_refraction:
+                mask, refr_o_full, refr_d_full = refract_rays(
+                    rays_o_full, rays_d_full, water_level, args.n_air, args.n_water
                 )
-            if mask.any():
-                rgb_depth[mask] = render_rays(
-                    network_water,
-                    refr_o_full,
-                    refr_d_full,
+                rgb_depth = torch.zeros(rays_o_full.shape[0], 5, device=device)
+                if (~mask).any():
+                    rgb_depth[~mask] = render_rays(
+                        network_air,
+                        rays_o_full[~mask],
+                        rays_d_full[~mask],
+                        args.near,
+                        args.far,
+                        args.num_samples,
+                        rand=False,
+                    )
+                if mask.any():
+                    rgb_depth[mask] = render_rays(
+                        network_water,
+                        refr_o_full,
+                        refr_d_full,
+                        args.near,
+                        args.far,
+                        args.num_samples,
+                        rand=False,
+                    )
+            else:
+                rgb_depth = render_rays(
+                    network,
+                    rays_o_full,
+                    rays_d_full,
                     args.near,
                     args.far,
                     args.num_samples,
@@ -255,24 +292,38 @@ def train(args):
 
             avg_loss = epoch_loss / len(dataloader)
             writer.add_scalar("epoch/loss", avg_loss, epoch)
-            writer.add_histogram(
-                "params/alpha_air", air_model.alpha_linear.weight, epoch
-            )
-            writer.add_histogram(
-                "params/alpha_water", water_model.alpha_linear.weight, epoch
-            )
+            if args.use_refraction:
+                writer.add_histogram(
+                    "params/alpha_air", air_model.alpha_linear.weight, epoch
+                )
+                writer.add_histogram(
+                    "params/alpha_water", water_model.alpha_linear.weight, epoch
+                )
+            else:
+                writer.add_histogram(
+                    "params/alpha", model.alpha_linear.weight, epoch
+                )
 
             writer.flush()
 
             if (epoch + 1) % args.save_every == 0 or epoch == args.num_epochs - 1:
-                ckpt_air = os.path.join(out_dir, f"air_model_{epoch:04d}.pt")
-                ckpt_water = os.path.join(out_dir, f"water_model_{epoch:04d}.pt")
-                torch.save(air_model.state_dict(), ckpt_air)
-                torch.save(water_model.state_dict(), ckpt_water)
-                torch.save({'water_level': water_level.detach().cpu()},
-                           os.path.join(out_dir, f"water_level_{epoch:04d}.pt"))
-                # Checkpoints allow resuming training or rendering later on.
-                print(f"Saved checkpoints to {ckpt_air} and {ckpt_water}")
+                if args.use_refraction:
+                    ckpt_air = os.path.join(out_dir, f"air_model_{epoch:04d}.pt")
+                    ckpt_water = os.path.join(out_dir, f"water_model_{epoch:04d}.pt")
+                    torch.save(air_model.state_dict(), ckpt_air)
+                    torch.save(water_model.state_dict(), ckpt_water)
+                    torch.save(
+                        {"water_level": water_level.detach().cpu()},
+                        os.path.join(out_dir, f"water_level_{epoch:04d}.pt"),
+                    )
+                    # Checkpoints allow resuming training or rendering later on.
+                    print(
+                        f"Saved checkpoints to {ckpt_air} and {ckpt_water}"
+                    )
+                else:
+                    ckpt = os.path.join(out_dir, f"model_{epoch:04d}.pt")
+                    torch.save(model.state_dict(), ckpt)
+                    print(f"Saved checkpoint to {ckpt}")
             epoch_bar.set_postfix({"loss": avg_loss, "psnr": psnr_eval.item()})
 
     writer.close()
@@ -309,6 +360,13 @@ if __name__ == '__main__':
                         help="Refractive index of air")
     parser.add_argument("--n_water", type=float, default=None,
                         help="Refractive index of water")
+    parser.add_argument(
+        "--use_refraction",
+        type=int,
+        choices=[0, 1],
+        default=None,
+        help="1 enables refraction-aware training, 0 trains a vanilla NeRF",
+    )
 
     args = parser.parse_args()
 
@@ -319,6 +377,8 @@ if __name__ == '__main__':
     for key, val in config.items():
         if getattr(args, key) is None:
             setattr(args, key, val)
+
+    args.use_refraction = bool(args.use_refraction)
 
     # Create a unique name for this run
     timestamp = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")

@@ -8,6 +8,7 @@
   "save_every": 100,
   "eval_index": 10,
   "downsample": 4,
+  "use_refraction": true,
   "water_level": 0.0,
   "n_air": 1.0,
   "n_water": 1.333
